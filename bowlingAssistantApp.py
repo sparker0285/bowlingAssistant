@@ -332,61 +332,76 @@ PIN_SVG_RAW = """<svg viewBox=\"0 0 64 64\" xmlns=\"http://www.w3.org/2000/svg\"
 st.markdown(f"""<style>.stCheckbox > input {{ display: none; }}.stCheckbox > label {{ display: inline-block; width: 50px; height: 50px; background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="gray").encode()).decode()}\"); background-size: contain; background-repeat: no-repeat; cursor: pointer; position: relative; text-align: center; line-height: 50px; font-weight: bold; color: black; font-size: 18px; }}.stCheckbox > input:checked + label {{ background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="white").encode()).decode()}\"); color: white; }}.stCheckbox > input:disabled + label {{ background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="#333").encode()).decode()}\"); cursor: not-allowed; }}</style>""", unsafe_allow_html=True)
 
 pins_selected = {}
-_, center_col, _ = st.columns([1, 1, 1])
-with center_col:
-    def pin_checkbox(pin_num, disabled=False):
-        return st.checkbox(str(pin_num), key=f"pin_{pin_num}", disabled=disabled)
+def pin_checkbox(pin_num, disabled=False):
+    return st.checkbox(str(pin_num), key=f"pin_{pin_num}", disabled=disabled)
 
-    pin_layout = {'row4': [7, 8, 9, 10], 'row3': [4, 5, 6], 'row2': [2, 3], 'row1': [1]}
-    
-    # Determine which pins should be disabled
-    is_strike = st.session_state.shot_result == "Strike"
-    is_spare = st.session_state.shot_result == "Spare"
-    pins_available_for_shot2 = st.session_state.pins_left_after_first_shot
-    
-    # In frame 10, after a strike or spare, the deck is reset
-    pins_are_reset = False
-    if st.session_state.current_frame == 10:
-        if st.session_state.current_shot == 2:
-            shot1_res = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 AND shot_number = 1").fetchone()
-            if shot1_res and shot1_res[0] == 'Strike': pins_are_reset = True
-        elif st.session_state.current_shot == 3:
-            pins_are_reset = True # Always reset for a fill ball
+pin_layout = {'row4': [7, 8, 9, 10], 'row3': [4, 5, 6], 'row2': [2, 3], 'row1': [1]}
 
-    if st.session_state.current_shot == 1 or pins_are_reset:
-        st.write("Select the pins **left standing**.")
-    else:
-        st.write("Select the pins **still standing** (for an Open frame).")
-    
-    # Row 4
-    row4_cols = st.columns(4)
-    for i, pin in enumerate(pin_layout['row4']):
-        with row4_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-            pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-    
-    # Row 3
-    _, r3c1, r3c2, r3c3, _ = st.columns([0.5, 1, 1, 1, 0.5])
-    row3_cols = [r3c1, r3c2, r3c3]
-    for i, pin in enumerate(pin_layout['row3']):
-        with row3_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-            pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
+# Determine which pins should be disabled
+is_strike = st.session_state.shot_result == "Strike"
+is_spare = st.session_state.shot_result == "Spare"
+pins_available_for_shot2 = st.session_state.pins_left_after_first_shot
 
-    # Row 2
-    _, r2c1, r2c2, _ = st.columns([1, 1, 1, 1])
-    row2_cols = [r2c1, r2c2]
-    for i, pin in enumerate(pin_layout['row2']):
-        with row2_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-            pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-    
-    # Row 1
-    _, r1c1, _ = st.columns([1.5, 1, 1.5])
-    with r1c1:
-        pin = pin_layout['row1'][0]
-        disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-        pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
+# In frame 10, after a strike or spare, the deck is reset
+pins_are_reset = False
+if st.session_state.current_frame == 10:
+    if st.session_state.current_shot == 2:
+        shot1_res = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 AND shot_number = 1").fetchone()
+        if shot1_res and shot1_res[0] == 'Strike': pins_are_reset = True
+    elif st.session_state.current_shot == 3:
+        pins_are_reset = True # Always reset for a fill ball
+
+if st.session_state.current_shot == 1 or pins_are_reset:
+    st.write("Select the pins **left standing**.")
+else:
+    st.write("Select the pins **still standing** (for an Open frame).")
+
+# Create a more robust grid that is less likely to stack on mobile
+# Using a 13-unit grid allows for better centering.
+
+# Row 4 (4 pins)
+c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(9)
+with c1:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 7 not in pins_available_for_shot2)
+    pins_selected[7] = pin_checkbox(7, disabled=disable_pin)
+with c3:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 8 not in pins_available_for_shot2)
+    pins_selected[8] = pin_checkbox(8, disabled=disable_pin)
+with c5:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 9 not in pins_available_for_shot2)
+    pins_selected[9] = pin_checkbox(9, disabled=disable_pin)
+with c7:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 10 not in pins_available_for_shot2)
+    pins_selected[10] = pin_checkbox(10, disabled=disable_pin)
+
+
+# Row 3 (3 pins)
+c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+with c2:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 4 not in pins_available_for_shot2)
+    pins_selected[4] = pin_checkbox(4, disabled=disable_pin)
+with c4:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 5 not in pins_available_for_shot2)
+    pins_selected[5] = pin_checkbox(5, disabled=disable_pin)
+with c6:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 6 not in pins_available_for_shot2)
+    pins_selected[6] = pin_checkbox(6, disabled=disable_pin)
+
+
+# Row 2 (2 pins)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c2:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 2 not in pins_available_for_shot2)
+    pins_selected[2] = pin_checkbox(2, disabled=disable_pin)
+with c4:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 3 not in pins_available_for_shot2)
+    pins_selected[3] = pin_checkbox(3, disabled=disable_pin)
+
+# Row 1 (1 pin)
+c1, c2, c3 = st.columns(3)
+with c2:
+    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 1 not in pins_available_for_shot2)
+    pins_selected[1] = pin_checkbox(1, disabled=disable_pin)
 
 # --- Submission Logic ---
 def submit_shot():
