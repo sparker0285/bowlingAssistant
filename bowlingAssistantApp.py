@@ -64,6 +64,7 @@ def get_db_connection():
                 shot_number INTEGER,
                 shot_result VARCHAR,
                 pins_knocked_down VARCHAR,
+                pins_left VARCHAR,
                 lane_number VARCHAR,
                 arrows_pos INTEGER,
                 breakpoint_pos INTEGER,
@@ -204,7 +205,7 @@ def upload_to_azure(con, game_number):
         st.success(f"Game {game_number} saved successfully to Azure as {blob_name}")
 
     except KeyError:
-        st.error("Azure credentials not found. Please configure .streamlit/secrets.toml")
+        st.error("Azure storage credentials not found. Please configure them in your Streamlit secrets.")
     except Exception as e:
         st.error(f"Failed to upload to Azure: {e}")
 
@@ -420,12 +421,12 @@ def submit_shot():
         
         st.session_state.pins_left_after_first_shot = pins_left_standing # Update for shot 3 if needed
 
-    pins_knocked_down_str = ", ".join(map(str, pins_knocked_down))
+    pins_left_standing_str = ", ".join(map(str, pins_left_standing))
     ball_reaction_str = st.session_state.ball_reaction if st.session_state.ball_reaction else "N/A"
 
     con.execute(
-        "INSERT INTO shots (game_number, frame_number, shot_number, shot_result, pins_knocked_down, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, st.session_state.lane_number, arrows, breakpoint, ball_reaction_str)
+        "INSERT INTO shots (game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, st.session_state.lane_number, arrows, breakpoint, ball_reaction_str)
     )
     st.success(f"Frame {st.session_state.current_frame}, Shot {st.session_state.current_shot} submitted!")
 
@@ -485,8 +486,22 @@ try:
         with col3:
              st.metric(label="Total Strikes", value=len(strike_df))
 
-        # Display full data table, hiding the ID
-        display_df = df[[c for c in df.columns if c != 'id']]
+        # Display full data table, hiding the ID and renaming columns
+        display_df = df.drop(columns=['id', 'pins_knocked_down'])
+        
+        column_renames = {
+            "game_number": "Game",
+            "frame_number": "Frame",
+            "shot_number": "Shot",
+            "shot_result": "Result",
+            "pins_left": "Pins Left",
+            "lane_number": "Lane",
+            "arrows_pos": "At Arrows",
+            "breakpoint_pos": "At Break",
+            "ball_reaction": "Notes",
+        }
+        display_df = display_df.rename(columns=column_renames)
+        
         st.dataframe(display_df, hide_index=True)
     else:
         st.info("No shots submitted yet. Submit a shot to see the data.")
@@ -501,7 +516,7 @@ st.header("🤖 AI Assistant")
 if 'df' in locals() and not df.empty:
     if st.button("Get AI Suggestion"):
         if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
-            st.error("Please add your Gemini API Key to the .streamlit/secrets.toml file.")
+            st.error("Please add your Gemini API Key to your Streamlit secrets.")
         else:
             api_key = st.secrets["GEMINI_API_KEY"]
             suggestion_placeholder = st.empty()
