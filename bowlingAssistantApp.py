@@ -14,7 +14,7 @@ def get_ai_suggestion(api_key, df_shots):
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('models/gemini-flash-latest')
 
         # Create a summary of the dataframe to pass to the model
         data_summary = df_shots.to_string()
@@ -72,6 +72,109 @@ def get_db_connection():
         """)
     return st.session_state.db_connection
 
+# --- Scoring Logic ---
+def get_pins_from_str(pins_str):
+    """Helper to convert comma-separated pin string to a list of ints."""
+    if not pins_str or pins_str == "N/A":
+        return []
+    return [int(p.strip()) for p in pins_str.split(',')]
+
+def calculate_scores(df):
+    """Calculates frame scores, total score, and max possible score."""
+    if df.empty:
+        return [0] * 10, 0, 300
+
+    shots = df.sort_values(by='id').to_dict('records')
+    
+    # Create a list of pin counts for each shot
+    raw_pins = []
+    for s in shots:
+        if s['shot_result'] == 'Strike':
+            raw_pins.append(10)
+        elif s['shot_result'] == 'Spare':
+            shot1_pins_str = [sh['pins_knocked_down'] for sh in shots if sh['frame_number'] == s['frame_number'] and sh['shot_number'] == 1][0]
+            raw_pins.append(10 - len(get_pins_from_str(shot1_pins_str)))
+        else:
+            raw_pins.append(len(get_pins_from_str(s['pins_knocked_down'])))
+            
+    frame_scores = [None] * 10
+    total_score = 0
+    shot_idx = 0
+    
+    for frame_idx in range(10):
+        if shot_idx >= len(shots):
+            break
+            
+        frame_num = frame_idx + 1
+        current_shot = shots[shot_idx]
+        
+        if current_shot['frame_number'] != frame_num:
+            continue
+            
+        frame_score = 0
+        
+        if frame_num < 10:
+            if current_shot['shot_result'] == 'Strike':
+                if shot_idx + 2 < len(raw_pins):
+                    frame_score = 10 + raw_pins[shot_idx + 1] + raw_pins[shot_idx + 2]
+                else: # Not enough shots yet for full bonus
+                    break
+                shot_idx += 1
+            else: # Leave
+                if shot_idx + 1 < len(shots) and shots[shot_idx+1]['frame_number'] == frame_num:
+                    shot2 = shots[shot_idx+1]
+                    if shot2['shot_result'] == 'Spare':
+                        if shot_idx + 2 < len(raw_pins):
+                            frame_score = 10 + raw_pins[shot_idx + 2]
+                        else: # Not enough shots yet for full bonus
+                            break
+                    else: # Open
+                        frame_score = raw_pins[shot_idx] + raw_pins[shot_idx+1]
+                    shot_idx += 2
+                else: # Incomplete frame
+                    break
+        else: # Frame 10
+            frame_10_shots = [s for s in shots if s['frame_number'] == 10]
+            frame_10_pins = [p for i, p in enumerate(raw_pins) if shots[i]['frame_number'] == 10]
+            
+            is_done = False
+            if frame_10_shots[0]['shot_result'] == 'Strike':
+                if len(frame_10_shots) == 3: is_done = True
+            elif 'Spare' in [s['shot_result'] for s in frame_10_shots]:
+                if len(frame_10_shots) == 3: is_done = True
+            else: # Open
+                if len(frame_10_shots) == 2: is_done = True
+            
+            if is_done:
+                frame_score = sum(frame_10_pins)
+            else:
+                break
+            shot_idx += len(frame_10_shots)
+
+        total_score += frame_score
+        frame_scores[frame_idx] = total_score
+
+    # --- Max Possible Score ---
+    max_score = total_score
+    
+    # Calculate potential of current, unfinished frame
+    current_frame_idx = st.session_state.current_frame -1
+    if current_frame_idx < 10 and frame_scores[current_frame_idx] is None:
+        
+        # Add score for current work
+        frame_shots = [s for s in shots if s['frame_number'] == st.session_state.current_frame]
+        if frame_shots:
+            if frame_shots[0]['shot_result'] == 'Leave':
+                 max_score += (10 - raw_pins[shot_idx]) # Pins for a spare
+                 max_score += 10 # Strike on fill ball
+        
+        # Add 30 for all future frames
+        for i in range(st.session_state.current_frame, 10):
+            max_score += 30
+
+    return frame_scores, total_score, max_score
+
+
 # --- Azure Integration ---
 def upload_to_azure(con, game_number):
     """Uploads the current game data to Azure Blob Storage."""
@@ -100,9 +203,6 @@ def upload_to_azure(con, game_number):
         
         st.success(f"Game {game_number} saved successfully to Azure as {blob_name}")
 
-        # Clear the local table for the next game
-        con.execute("DELETE FROM shots")
-
     except KeyError:
         st.error("Azure credentials not found. Please configure .streamlit/secrets.toml")
     except Exception as e:
@@ -124,26 +224,41 @@ if 'pins_left_after_first_shot' not in st.session_state:
     st.session_state.pins_left_after_first_shot = []
 if 'starting_lane' not in st.session_state:
     st.session_state.starting_lane = "Left Lane"
+if 'game_over' not in st.session_state:
+    st.session_state.game_over = False
 
 # Get DB connection
 con = get_db_connection()
 
-# --- Game Management ---
+# --- Game Management & Scoring ---
 st.sidebar.header("Game Management")
 st.sidebar.metric("Current Game", st.session_state.game_number)
-st.sidebar.metric("Current Frame", st.session_state.current_frame)
-st.sidebar.metric("Current Shot", st.session_state.current_shot)
+
+if not st.session_state.game_over:
+    st.sidebar.metric("Current Frame", st.session_state.current_frame)
+    st.sidebar.metric("Current Shot", st.session_state.current_shot)
+else:
+    st.sidebar.success("🎉 Game Over! 🎉")
 
 if st.sidebar.button("Start New Game"):
     st.session_state.game_number += 1
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
     st.session_state.pins_left_after_first_shot = []
+    st.session_state.game_over = False
     con.execute("DELETE FROM shots")
-    st.experimental_rerun()
+    st.rerun()
 
 if st.sidebar.button("Save Game to Azure"):
     upload_to_azure(con, st.session_state.game_number)
+
+# --- Scoring Display ---
+df_for_score = con.execute("SELECT * FROM shots ORDER BY id").fetchdf()
+frame_scores, total_score, max_score = calculate_scores(df_for_score)
+
+st.sidebar.header("Score")
+st.sidebar.metric("Current Score", total_score)
+st.sidebar.metric("Max Possible Score", max_score)
 
 
 # --- Shot Input ---
@@ -153,13 +268,29 @@ st.header(f"Frame {st.session_state.current_frame} - Shot {st.session_state.curr
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.session_state.current_shot == 1:
-        shot_result_options = ["Strike", "Leave"]
-        shot_result_label = "First Shot Result"
-    else: # Second shot
-        shot_result_options = ["Spare", "Open"]
-        shot_result_label = "Second Shot Result"
+    shot_result_options = []
+    shot_result_label = "Shot Result"
     
+    # Logic for 10th frame shot options
+    if st.session_state.current_frame == 10:
+        if st.session_state.current_shot == 1:
+            shot_result_options = ["Strike", "Leave"]
+        elif st.session_state.current_shot == 2:
+            frame10_shot1_res = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 AND shot_number = 1").fetchone()
+            if frame10_shot1_res and frame10_shot1_res[0] == 'Strike':
+                shot_result_options = ["Strike", "Leave"]
+            else:
+                shot_result_options = ["Spare", "Open"]
+        elif st.session_state.current_shot == 3:
+            shot_result_options = ["Strike", "Leave", "Open"] # Can be anything on the fill ball
+    
+    # Logic for frames 1-9
+    if not shot_result_options:
+        if st.session_state.current_shot == 1:
+            shot_result_options = ["Strike", "Leave"]
+        else:
+            shot_result_options = ["Spare", "Open"]
+
     shot_result = st.selectbox(shot_result_label, shot_result_options, key="shot_result")
 
 with col2:
@@ -176,12 +307,13 @@ with col2:
     st.metric("Current Lane", lane_number)
     st.session_state.lane_number = lane_number
 
-if st.session_state.current_shot == 1:
+# Hide trajectory for spare shots or 10th frame non-first shots
+if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
     st.subheader("Ball Trajectory")
-    col1, col2 = st.columns(2)
-    with col1:
+    col1a, col2a = st.columns(2)
+    with col1a:
         arrows_pos = st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
-    with col2:
+    with col2a:
         breakpoint_pos = st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
 
 ball_reaction = st.text_input("Ball Reaction (e.g., broke early, held line)", key="ball_reaction")
@@ -189,82 +321,41 @@ ball_reaction = st.text_input("Ball Reaction (e.g., broke early, held line)", ke
 # --- Pin Selection UI ---
 st.subheader("Pin Selection")
 
-# Base64 encoded SVG for a bowling pin. It's a simple design that can be colored with CSS.
-PIN_SVG_RAW = """
-<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-    <path d="M32 0C24.3 0 18 6.3 18 14c0 3.9 1.6 7.4 4.2 9.9C16.3 26.9 12 34.5 12 43c0 8.3 4.5 15.4 11 19.2V64h18v-1.8c6.5-3.8 11-10.9 11-19.2 0-8.5-4.3-16.1-10.2-19.1 2.6-2.5 4.2-6 4.2-9.9C46 6.3 39.7 0 32 0z" fill="{color}"/>
-</svg>
-"""
-
-# CSS to style checkboxes as clickable images
-st.markdown(f"""
-<style>
-    .stCheckbox > input {{
-        display: none;
-    }}
-    .stCheckbox > label {{
-        display: inline-block;
-        width: 50px;
-        height: 50px;
-        background-image: url("data:image/svg+xml;base64,{
-            base64.b64encode(PIN_SVG_RAW.format(color="gray").encode()).decode()
-        }");
-        background-size: contain;
-        background-repeat: no-repeat;
-        cursor: pointer;
-        position: relative;
-        text-align: center;
-        line-height: 50px;
-        font-weight: bold;
-        color: black;
-        font-size: 18px;
-    }}
-    .stCheckbox > input:checked + label {{
-        background-image: url("data:image/svg+xml;base64,{
-            base64.b64encode(PIN_SVG_RAW.format(color="white").encode()).decode()
-        }");
-        color: white;
-    }}
-    .stCheckbox > input:disabled + label {{
-        background-image: url("data:image/svg+xml;base64,{
-            base64.b64encode(PIN_SVG_RAW.format(color="#333").encode()).decode()
-        }");
-        cursor: not-allowed;
-    }}
-</style>
-""", unsafe_allow_html=True)
+PIN_SVG_RAW = """<svg viewBox=\"0 0 64 64\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M32 0C24.3 0 18 6.3 18 14c0 3.9 1.6 7.4 4.2 9.9C16.3 26.9 12 34.5 12 43c0 8.3 4.5 15.4 11 19.2V64h18v-1.8c6.5-3.8 11-10.9 11-19.2 0-8.5-4.3-16.1-10.2-19.1 2.6-2.5 4.2-6 4.2-9.9C46 6.3 39.7 0 32 0z\" fill=\"{color}\" /></svg>"""
+st.markdown(f"""<style>.stCheckbox > input {{ display: none; }}.stCheckbox > label {{ display: inline-block; width: 50px; height: 50px; background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="gray").encode()).decode()}\"); background-size: contain; background-repeat: no-repeat; cursor: pointer; position: relative; text-align: center; line-height: 50px; font-weight: bold; color: black; font-size: 18px; }}.stCheckbox > input:checked + label {{ background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="white").encode()).decode()}\"); color: white; }}.stCheckbox > input:disabled + label {{ background-image: url(\"data:image/svg+xml;base64,{base64.b64encode(PIN_SVG_RAW.format(color="#333").encode()).decode()}\"); cursor: not-allowed; }}</style>""", unsafe_allow_html=True)
 
 pins_selected = {}
-
-# --- Pin Display Logic ---
 _, center_col, _ = st.columns([1, 1, 1])
 with center_col:
-    # Helper to create a checkbox for a pin
     def pin_checkbox(pin_num, disabled=False):
         return st.checkbox(str(pin_num), key=f"pin_{pin_num}", disabled=disabled)
 
-    # Pin layout using columns
-    pin_layout = {
-        'row4': [7, 8, 9, 10],
-        'row3': [4, 5, 6],
-        'row2': [2, 3],
-        'row1': [1]
-    }
+    pin_layout = {'row4': [7, 8, 9, 10], 'row3': [4, 5, 6], 'row2': [2, 3], 'row1': [1]}
     
-    is_strike = st.session_state.current_shot == 1 and st.session_state.shot_result == "Strike"
-    is_spare = st.session_state.current_shot == 2 and st.session_state.shot_result == "Spare"
+    # Determine which pins should be disabled
+    is_strike = st.session_state.shot_result == "Strike"
+    is_spare = st.session_state.shot_result == "Spare"
     pins_available_for_shot2 = st.session_state.pins_left_after_first_shot
+    
+    # In frame 10, after a strike or spare, the deck is reset
+    pins_are_reset = False
+    if st.session_state.current_frame == 10:
+        if st.session_state.current_shot == 2:
+            shot1_res = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 AND shot_number = 1").fetchone()
+            if shot1_res and shot1_res[0] == 'Strike': pins_are_reset = True
+        elif st.session_state.current_shot == 3:
+            pins_are_reset = True # Always reset for a fill ball
 
-    if st.session_state.current_shot == 1:
+    if st.session_state.current_shot == 1 or pins_are_reset:
         st.write("Select the pins **left standing**.")
     else:
         st.write("Select the pins **still standing** (for an Open frame).")
-
+    
     # Row 4
     row4_cols = st.columns(4)
     for i, pin in enumerate(pin_layout['row4']):
         with row4_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and pin not in pins_available_for_shot2)
+            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
             pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
     
     # Row 3
@@ -272,7 +363,7 @@ with center_col:
     row3_cols = [r3c1, r3c2, r3c3]
     for i, pin in enumerate(pin_layout['row3']):
         with row3_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and pin not in pins_available_for_shot2)
+            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
             pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
 
     # Row 2
@@ -280,119 +371,146 @@ with center_col:
     row2_cols = [r2c1, r2c2]
     for i, pin in enumerate(pin_layout['row2']):
         with row2_cols[i]:
-            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and pin not in pins_available_for_shot2)
+            disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
             pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
     
     # Row 1
     _, r1c1, _ = st.columns([1.5, 1, 1.5])
     with r1c1:
         pin = pin_layout['row1'][0]
-        disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and pin not in pins_available_for_shot2)
+        disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
         pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-
 
 # --- Submission Logic ---
 def submit_shot():
     pins_knocked_down_str = "N/A"
     
-    arrows = st.session_state.arrows_pos if st.session_state.current_shot == 1 else None
-    breakpoint = st.session_state.breakpoint_pos if st.session_state.current_shot == 1 else None
+    # Determine arrows/breakpoint
+    use_trajectory = st.session_state.current_shot == 1 or \
+        (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
+    arrows = st.session_state.arrows_pos if use_trajectory else None
+    breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
 
+    shot_res = st.session_state.shot_result
+    
+    pins_left_standing = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
+    
+    # Calculate pins knocked down based on context
     if st.session_state.current_shot == 1:
-        if st.session_state.shot_result == "Strike":
+        if shot_res == "Strike":
             pins_knocked_down = list(range(1, 11))
             st.session_state.pins_left_after_first_shot = []
         else: # Leave
-            pins_left = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
-            pins_knocked_down = [p for p in range(1, 11) if p not in pins_left]
-            st.session_state.pins_left_after_first_shot = pins_left
-        
-        pins_knocked_down_str = ", ".join(map(str, pins_knocked_down))
-
-    else: # Second shot
-        pins_left_after_shot1 = st.session_state.pins_left_after_first_shot
-        if st.session_state.shot_result == "Spare":
-            pins_knocked_down = pins_left_after_shot1
+            pins_knocked_down = [p for p in range(1, 11) if p not in pins_left_standing]
+            st.session_state.pins_left_after_first_shot = pins_left_standing
+    else: # Shots 2 or 3
+        prev_pins_left = st.session_state.pins_left_after_first_shot
+        if shot_res == "Spare":
+            pins_knocked_down = prev_pins_left
+        elif shot_res == "Strike": # e.g., Shot 2 in 10th frame
+            pins_knocked_down = list(range(1, 11))
         else: # Open
-            pins_still_standing = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
-            pins_knocked_down = [p for p in pins_left_after_shot1 if p not in pins_still_standing]
+            pins_knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
+        
+        st.session_state.pins_left_after_first_shot = pins_left_standing # Update for shot 3 if needed
 
-        pins_knocked_down_str = ", ".join(map(str, pins_knocked_down))
-
-
+    pins_knocked_down_str = ", ".join(map(str, pins_knocked_down))
     ball_reaction_str = st.session_state.ball_reaction if st.session_state.ball_reaction else "N/A"
 
-    # Insert data into DuckDB
     con.execute(
         "INSERT INTO shots (game_number, frame_number, shot_number, shot_result, pins_knocked_down, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, st.session_state.shot_result, pins_knocked_down_str, st.session_state.lane_number, arrows, breakpoint, ball_reaction_str)
+        (st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, st.session_state.lane_number, arrows, breakpoint, ball_reaction_str)
     )
     st.success(f"Frame {st.session_state.current_frame}, Shot {st.session_state.current_shot} submitted!")
 
     # --- State Transition Logic ---
-    # Advance to next shot or frame
-    if st.session_state.current_shot == 2 or st.session_state.shot_result == "Strike":
-        st.session_state.current_frame += 1
-        st.session_state.current_shot = 1
-        st.session_state.pins_left_after_first_shot = []
-    else: # Move to shot 2
-        st.session_state.current_shot = 2
-
-    # Clear pin selections for the next shot
-    for i in range(1, 11):
-        st.session_state[f'pin_{i}'] = False
+    frame = st.session_state.current_frame
+    shot = st.session_state.current_shot
     
-    # Reset ball reaction
+    if frame < 10:
+        if shot == 2 or shot_res == "Strike":
+            st.session_state.current_frame += 1
+            st.session_state.current_shot = 1
+            st.session_state.pins_left_after_first_shot = []
+        else:
+            st.session_state.current_shot = 2
+    else: # Frame 10
+        if shot == 1:
+            st.session_state.current_shot = 2
+            if shot_res == "Strike":
+                st.session_state.pins_left_after_first_shot = [] # Reset for next shot
+        elif shot == 2:
+            frame10_shot1 = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 and shot_number = 1").fetchone()[0]
+            if frame10_shot1 == "Strike" or shot_res == "Spare":
+                st.session_state.current_shot = 3
+                st.session_state.pins_left_after_first_shot = [] # Reset for fill ball
+            else: # Game over
+                st.session_state.game_over = True
+        elif shot == 3: # Game over
+            st.session_state.game_over = True
+
+    # Clear UI elements
+    for i in range(1, 11): st.session_state[f'pin_{i}'] = False
     st.session_state.ball_reaction = ""
 
-
-st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
+if not st.session_state.game_over:
+    st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
+else:
+    st.balloons()
+    st.header("🎉 Game Over! Final Score: " + str(total_score))
 
 # --- Analytical Dashboard ---
 st.header("📊 Game Data")
-
-# Query the database
 try:
     df = con.execute("SELECT * FROM shots ORDER BY frame_number, shot_number").fetchdf()
-
     if not df.empty:
-        # Calculate Strike Percentage
-        # A strike is a single shot in a frame with the result 'Strike'
+        col1, col2, col3 = st.columns(3)
         strike_df = df[(df['shot_result'] == 'Strike')]
-        
-        # Count strikes per lane
         strike_counts = strike_df['lane_number'].value_counts()
-        
-        # Count total frames per lane. We can approximate this by looking at the unique frame numbers per lane.
         total_frames_left = df[df['lane_number'] == 'Left Lane']['frame_number'].nunique()
         total_frames_right = df[df['lane_number'] == 'Right Lane']['frame_number'].nunique()
-
-        # Display results
-        col1, col2 = st.columns(2)
+        
         with col1:
             left_strike_percentage = (strike_counts.get('Left Lane', 0) / total_frames_left * 100) if total_frames_left > 0 else 0
-            st.metric(
-                label="Left Lane Strike %",
-                value=f"{left_strike_percentage:.2f}%"
-            )
+            st.metric(label="Left Lane Strike %", value=f"{left_strike_percentage:.2f}%")
         with col2:
             right_strike_percentage = (strike_counts.get('Right Lane', 0) / total_frames_right * 100) if total_frames_right > 0 else 0
-            st.metric(
-                label="Right Lane Strike %",
-                value=f"{right_strike_percentage:.2f}%"
-            )
+            st.metric(label="Right Lane Strike %", value=f"{right_strike_percentage:.2f}%")
+        with col3:
+             st.metric(label="Total Strikes", value=len(strike_df))
 
-        # Reorder and select columns for display
-        display_df = df[['game_number', 'frame_number', 'shot_number', 'shot_result', 'lane_number', 'pins_knocked_down', 'arrows_pos', 'breakpoint_pos', 'ball_reaction']]
+        # Display full data table, hiding the ID
+        display_df = df[[c for c in df.columns if c != 'id']]
         st.dataframe(display_df, hide_index=True)
     else:
         st.info("No shots submitted yet. Submit a shot to see the data.")
-
 except duckdb.Error as e:
     st.error(f"An error occurred with the database: {e}")
 
 # --- AI Assistant ---
 st.header("🤖 AI Assistant")
+
+if st.button("List Available AI Models"):
+    try:
+        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
+            st.error("Please add your Gemini API Key to the .streamlit/secrets.toml file to list models.")
+        else:
+            api_key = st.secrets["GEMINI_API_KEY"]
+            genai.configure(api_key=api_key)
+            
+            st.info("Querying for available models...")
+            models = genai.list_models()
+            
+            model_info = []
+            for m in models:
+                model_info.append(f"**Model Name:** `{m.name}`")
+                model_info.append(f"  - Supported Method: `generateContent`? {'generateContent' in m.supported_generation_methods}")
+            
+            st.success("Found the following models available with your API key:")
+            st.markdown("\n".join(model_info))
+
+    except Exception as e:
+        st.error(f"An error occurred while trying to list the available models: {e}")
 
 if 'df' in locals() and not df.empty:
     if st.button("Get AI Suggestion"):
@@ -404,8 +522,5 @@ if 'df' in locals() and not df.empty:
             with st.spinner("🤖 Calling the coach for advice..."):
                 suggestion = get_ai_suggestion(api_key, df)
                 suggestion_placeholder.markdown(suggestion)
-
 else:
     st.info("Submit some shots to get an AI-powered analysis.")
-
-
