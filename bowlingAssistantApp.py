@@ -291,20 +291,26 @@ with col1:
         else:
             shot_result_options = ["Spare", "Open"]
 
-    shot_result = st.selectbox(shot_result_label, shot_result_options, key="shot_result")
+    shot_result = st.radio(shot_result_label, shot_result_options, key="shot_result", horizontal=True)
 
 with col2:
     if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
-        st.session_state.starting_lane = st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="lane_select")
+        sub_col1, sub_col2 = st.columns(2)
+        with sub_col1:
+            # The key 'starting_lane' will directly update the session state variable
+            st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
+        
         lane_number = st.session_state.starting_lane
+        with sub_col2:
+            st.metric("Current Lane", lane_number)
     else:
         # Determine lane based on starting lane and frame number
         if st.session_state.starting_lane == "Left Lane":
             lane_number = "Left Lane" if st.session_state.current_frame % 2 != 0 else "Right Lane"
         else: # Started on Right Lane
             lane_number = "Right Lane" if st.session_state.current_frame % 2 != 0 else "Left Lane"
-    
-    st.metric("Current Lane", lane_number)
+        st.metric("Current Lane", lane_number)
+
     st.session_state.lane_number = lane_number
 
 # Hide trajectory for spare shots or 10th frame non-first shots
@@ -490,27 +496,7 @@ except duckdb.Error as e:
 # --- AI Assistant ---
 st.header("🤖 AI Assistant")
 
-if st.button("List Available AI Models"):
-    try:
-        if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"]:
-            st.error("Please add your Gemini API Key to the .streamlit/secrets.toml file to list models.")
-        else:
-            api_key = st.secrets["GEMINI_API_KEY"]
-            genai.configure(api_key=api_key)
-            
-            st.info("Querying for available models...")
-            models = genai.list_models()
-            
-            model_info = []
-            for m in models:
-                model_info.append(f"**Model Name:** `{m.name}`")
-                model_info.append(f"  - Supported Method: `generateContent`? {'generateContent' in m.supported_generation_methods}")
-            
-            st.success("Found the following models available with your API key:")
-            st.markdown("\n".join(model_info))
 
-    except Exception as e:
-        st.error(f"An error occurred while trying to list the available models: {e}")
 
 if 'df' in locals() and not df.empty:
     if st.button("Get AI Suggestion"):
