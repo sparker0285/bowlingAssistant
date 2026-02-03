@@ -328,6 +328,38 @@ ball_reaction = st.text_input("Ball Reaction (e.g., broke early, held line)", ke
 # --- Pin Selection UI ---
 st.subheader("Pin Selection")
 
+# Static reference image for pin layout
+PIN_LAYOUT_SVG = """
+<svg width="200" height="130" viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .pin-circle {{ fill: none; stroke: #888; stroke-width: 2; }}
+    .pin-text {{ font-family: sans-serif; font-size: 18px; text-anchor: middle; dominant-baseline: middle; fill: #888; font-weight: bold; }}
+  </style>
+  <g transform="translate(20, 0)">
+    <g> <!-- Row 4 -->
+      <circle cx="20" cy="105" r="15" class="pin-circle" /><text x="20" y="105" class="pin-text">7</text>
+      <circle cx="60" cy="105" r="15" class="pin-circle" /><text x="60" y="105" class="pin-text">8</text>
+      <circle cx="100" cy="105" r="15" class="pin-circle" /><text x="100" y="105" class="pin-text">9</text>
+      <circle cx="140" cy="105" r="15" class="pin-circle" /><text x="140" y="105" class="pin-text">10</text>
+    </g>
+    <g> <!-- Row 3 -->
+      <circle cx="40" cy="75" r="15" class="pin-circle" /><text x="40" y="75" class="pin-text">4</text>
+      <circle cx="80" cy="75" r="15" class="pin-circle" /><text x="80" y="75" class="pin-text">5</text>
+      <circle cx="120" cy="75" r="15" class="pin-circle" /><text x="120" y="75" class="pin-text">6</text>
+    </g>
+    <g> <!-- Row 2 -->
+      <circle cx="60" cy="45" r="15" class="pin-circle" /><text x="60" y="45" class="pin-text">2</text>
+      <circle cx="100" cy="45" r="15" class="pin-circle" /><text x="100" y="45" class="pin-text">3</text>
+    </g>
+    <g> <!-- Row 1 -->
+      <circle cx="80" cy="15" r="15" class="pin-circle" /><text x="80" y="15" class="pin-text">1</text>
+    </g>
+  </g>
+</svg>
+"""
+st.image(PIN_LAYOUT_SVG)
+
+
 pins_selected = {}
 def pin_checkbox(pin_num, disabled=False):
     """Creates a standard checkbox for a given pin number."""
@@ -353,33 +385,15 @@ if st.session_state.current_shot == 1 or pins_are_reset:
 else:
     st.write("Select the pins **still standing** (for an Open frame).")
 
-# Create a simplified, left-aligned layout that is more mobile-friendly
-# Row 4
-row4_cols = st.columns(4)
-for i, pin in enumerate([7, 8, 9, 10]):
-    with row4_cols[i]:
+# Create a mobile-friendly 2x5 grid for the checkboxes
+c1, c2, c3, c4, c5 = st.columns(5)
+checkbox_pins = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+cols = [c1, c2, c3, c4, c5]
+
+for i, pin in enumerate(checkbox_pins):
+    with cols[i % 5]:
         disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
         pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-
-# Row 3
-row3_cols = st.columns(3)
-for i, pin in enumerate([4, 5, 6]):
-    with row3_cols[i]:
-        disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-        pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-
-# Row 2
-row2_cols = st.columns(2)
-for i, pin in enumerate([2, 3]):
-    with row2_cols[i]:
-        disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and pin not in pins_available_for_shot2)
-        pins_selected[pin] = pin_checkbox(pin, disabled=disable_pin)
-
-# Row 1
-row1_cols = st.columns(1)
-with row1_cols[0]:
-    disable_pin = is_strike or is_spare or (st.session_state.current_shot == 2 and not pins_are_reset and 1 not in pins_available_for_shot2)
-    pins_selected[1] = pin_checkbox(1, disabled=disable_pin)
 
 # --- Submission Logic ---
 def submit_shot():
