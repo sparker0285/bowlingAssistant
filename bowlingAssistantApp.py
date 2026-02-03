@@ -332,8 +332,8 @@ st.subheader("Pin Selection")
 PIN_LAYOUT_SVG = """
 <svg width="250" height="150" viewBox="0 0 250 150" xmlns="http://www.w3.org/2000/svg">
   <style>
-    .pin-circle {{ fill: white; stroke: black; stroke-width: 1.5; }}
-    .pin-text {{ font-family: sans-serif; font-size: 22px; text-anchor: middle; dominant-baseline: middle; fill: black; font-weight: bold; }}
+    .pin-circle {{ fill: var(--background-color); stroke: var(--text-color); stroke-width: 1.5; }}
+    .pin-text {{ font-family: sans-serif; font-size: 22px; text-anchor: middle; dominant-baseline: middle; fill: var(--text-color); font-weight: bold; }}
   </style>
   <g transform="translate(45, 0)">
     <g> <!-- Row 4 -->
