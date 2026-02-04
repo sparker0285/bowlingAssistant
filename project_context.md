@@ -183,3 +183,11 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 13. **Resilient Lane Calculation:**
     *   **Reasoning:** The `st.session_state.starting_lane` value was still being lost on some script reruns, causing an `AttributeError` when the lane was calculated for the second shot.
     *   **Change:** A "bulletproof" guard clause was added to the lane calculation logic. Before calculating the current lane, it now checks if `st.session_state.starting_lane` exists. If it is missing, it immediately fetches the value from the database for the current game, making the calculation self-healing and preventing the crash.
+
+**Update (Follow-up):** The user requested several UI improvements.
+
+14. **UI Enhancements:**
+    *   **Reasoning:** The user wanted to improve the layout and usability of the application.
+    *   **Change:** The broken pin reference image was replaced with a clear, text-based diagram.
+    *   **Change:** The pin selection checkboxes were replaced with a single, space-saving multiselect dropdown menu.
+    *   **Change:** The "Current Lane" display was changed from a large metric to a smaller, more subtle markdown element to reduce its visual prominence.

@@ -488,7 +488,6 @@ if st.session_state.game_over:
 else:
     st.subheader(f"Frame {st.session_state.current_frame} - Shot {st.session_state.current_shot}")
     
-    # --- Lane Calculation & Display ---
     col1, col2 = st.columns(2)
     with col1:
         shot_result_options = []
@@ -507,7 +506,6 @@ else:
         if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
         
-        # FIX: Ensure starting_lane is always available
         if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
             first_shot_db = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
             st.session_state.starting_lane = first_shot_db[0] if first_shot_db else "Left Lane"
@@ -515,7 +513,7 @@ else:
         is_odd_frame = st.session_state.current_frame % 2 != 0
         starts_on_left = st.session_state.starting_lane == "Left Lane"
         lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
-        st.metric("Current Lane", lane_number)
+        st.markdown(f"**Current Lane:** {lane_number}")
 
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
@@ -525,18 +523,29 @@ else:
     st.text_input("Ball Reaction", key="ball_reaction")
     
     st.subheader("Pins Left Standing")
-    is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
-    pins_available = st.session_state.get('pins_left_after_first_shot', [])
-    
-    if st.session_state.current_shot == 1: st.write("Select pins **left standing**.")
-    else: st.write("Select pins **still standing** (for an Open frame).")
+    st.code("""
+    7   8   9   10
+      4   5   6
+        2   3
+          1
+    """, language=None)
 
-    pins_selected = {}
-    cols = st.columns(10)
-    for i in range(1, 11):
-        disable_pin = is_spare_or_strike or (st.session_state.current_shot == 2 and i not in pins_available)
-        with cols[i-1]:
-            pins_selected[i] = st.checkbox(str(i), key=f"pin_{i}", disabled=disable_pin)
+    is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
+    
+    if st.session_state.current_shot == 1:
+        options = list(range(1, 11))
+        help_text = "Select the pins left standing after your first shot."
+    else:
+        options = st.session_state.get('pins_left_after_first_shot', [])
+        help_text = "Select the pins still standing to record an open frame."
+
+    st.multiselect(
+        "Pins Left Standing",
+        options=options,
+        key="pins_left_multiselect",
+        help=help_text,
+        disabled=is_spare_or_strike
+    )
 
     def submit_shot():
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
@@ -544,7 +553,7 @@ else:
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
         
         shot_res = st.session_state.shot_result
-        pins_left_standing = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
+        pins_left_standing = st.session_state.pins_left_multiselect
         pins_knocked_down_str = "N/A"
 
         if st.session_state.current_shot == 1:
@@ -592,8 +601,7 @@ else:
             else:
                 st.session_state.game_over = True
         
-        for i in range(1, 11):
-            st.session_state[f'pin_{i}'] = False
+        st.session_state.pins_left_multiselect = []
         st.session_state.ball_reaction = ""
         
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
