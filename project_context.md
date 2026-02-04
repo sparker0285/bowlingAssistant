@@ -86,3 +86,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The user wanted the data display and AI to be more relevant to the selected set.
     *   **Change:** The data table now shows all games within the selected set, sorted with the most recent frames first.
     *   **Change:** The AI Assistant now uses the entire set of games for its real-time advice.
+
+**Update (Follow-up):** The user reported an `AttributeError` when switching the shot result in the second frame.
+
+4.  **AttributeError Fix and State Management:**
+    *   **Reasoning:** The `st.session_state.starting_lane` variable was not being correctly persisted across all app reruns, causing a crash when it was accessed in later frames.
+    *   **Change:** A guard clause was added to the lane selection logic. If `starting_lane` is missing from the session state, it is fetched from the database for the current game.
+    *   **Change:** The state initialization logic was improved to ensure `starting_lane` is correctly set when starting a new set, starting a new game, or switching between existing games. This makes the app more resilient to state loss.

@@ -258,11 +258,16 @@ selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_
 if selected_set_id != st.session_state.set_id:
     st.session_state.set_id = selected_set_id
     st.session_state.set_name = selected_set_name
-    # Load the latest game from the selected set
     latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC LIMIT 1", [selected_set_id]).fetchone()
     if latest_game:
         st.session_state.game_id = latest_game[0]
         st.session_state.game_number = latest_game[1]
+        first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [latest_game[0]]).fetchone()
+        st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
+    else:
+        st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        st.session_state.game_number = 1
+        st.session_state.starting_lane = "Left Lane"
     st.rerun()
 
 if st.sidebar.button("Start New Set"):
@@ -272,6 +277,7 @@ if st.sidebar.button("Start New Set"):
     st.session_state.game_number = 1
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
+    st.session_state.starting_lane = "Left Lane"
     st.rerun()
 
 if st.sidebar.button("Save Set to Azure"):
@@ -294,7 +300,8 @@ selected_game_id = [gid for gid, name in game_map.items() if name == selected_ga
 if selected_game_id != st.session_state.game_id:
     st.session_state.game_id = selected_game_id
     st.session_state.game_number = int(game_map[selected_game_id].replace("Game ", ""))
-    # Logic to restore state for the selected game would go here
+    first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [selected_game_id]).fetchone()
+    st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
     st.rerun()
 
 if st.sidebar.button("Start New Game in Set"):
@@ -304,6 +311,7 @@ if st.sidebar.button("Start New Game in Set"):
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
     st.session_state.game_over = False
+    st.session_state.starting_lane = "Left Lane"
     st.rerun()
 
 
@@ -324,7 +332,6 @@ if st.session_state.game_over:
     st.success("🎉 Game Over! Start a new game to continue.")
 else:
     st.subheader(f"Frame {st.session_state.current_frame} - Shot {st.session_state.current_shot}")
-    # ... (Shot input UI remains the same)
     col1, col2 = st.columns(2)
     with col1:
         shot_result_options = []
@@ -332,7 +339,8 @@ else:
         if st.session_state.current_frame == 10:
             if st.session_state.current_shot == 1: shot_result_options = ["Strike", "Leave"]
             elif st.session_state.current_shot == 2:
-                shot1_res = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]['shot_result'].iloc[0]
+                shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
+                shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
                 shot_result_options = ["Strike", "Leave"] if shot1_res == 'Strike' else ["Spare", "Open"]
             else: shot_result_options = ["Strike", "Leave", "Open"]
         else:
@@ -343,13 +351,17 @@ else:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
             lane_number = st.session_state.starting_lane
         else:
+            # --- FIX: Guard against state loss by fetching from DB if needed ---
+            if 'starting_lane' not in st.session_state:
+                first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
+                st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
+            
             is_odd_frame = st.session_state.current_frame % 2 != 0
             starts_on_left = st.session_state.starting_lane == "Left Lane"
             lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
         st.metric("Current Lane", lane_number)
         st.session_state.lane_number = lane_number
     
-    # ... (Trajectory and Pin UI remains the same)
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
         col1a, col2a = st.columns(2)
@@ -362,9 +374,7 @@ else:
     st.subheader("Pins Left Standing")
     pins_selected = {pin: st.checkbox(str(pin), key=f"pin_{pin}") for pin in range(1, 11)}
 
-
     def submit_shot():
-        # ... (submission logic now includes set_id and set_name)
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
         arrows = st.session_state.arrows_pos if use_trajectory else None
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
@@ -377,7 +387,6 @@ else:
         )
         con.commit()
         
-        # --- State Transition Logic ---
         shot_res = st.session_state.shot_result
         if st.session_state.current_frame < 10:
             if st.session_state.current_shot == 2 or shot_res == "Strike":
@@ -386,7 +395,8 @@ else:
             else:
                 st.session_state.current_shot = 2
         else: # Frame 10
-            shot1_res = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]['shot_result'].iloc[0] if not df_current_game.empty else ''
+            shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
+            shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
             if st.session_state.current_shot == 1:
                 st.session_state.current_shot = 2
             elif st.session_state.current_shot == 2:
@@ -403,7 +413,6 @@ else:
 # --- Analytical Dashboard ---
 st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
-    # Sort by game number, then frame number descending
     display_df = df_set.sort_values(by=['game_number', 'frame_number', 'id'], ascending=[True, False, False])
     st.dataframe(display_df.drop(columns=['id', 'set_id', 'game_id', 'pins_knocked_down', 'shot_timestamp']), hide_index=True)
 else:
