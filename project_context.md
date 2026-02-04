@@ -177,3 +177,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The state management was refactored to eliminate the conflicting logic. The `restore_state` function was improved to correctly restore the state of the most recently selected set and game, preventing the application from getting stuck in a loop.
     *   **Change:** The `initialize_set` function was created to centralize the logic for initializing a new or existing set.
     *   **Change:** The `restore_game_state` function was created to restore the state of the current game from the database.
+
+**Update (Follow-up):** The user reported a recurring `AttributeError` when submitting the second shot of a frame.
+
+13. **Resilient Lane Calculation:**
+    *   **Reasoning:** The `st.session_state.starting_lane` value was still being lost on some script reruns, causing an `AttributeError` when the lane was calculated for the second shot.
+    *   **Change:** A "bulletproof" guard clause was added to the lane calculation logic. Before calculating the current lane, it now checks if `st.session_state.starting_lane` exists. If it is missing, it immediately fetches the value from the database for the current game, making the calculation self-healing and preventing the crash.

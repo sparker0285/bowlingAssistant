@@ -299,7 +299,7 @@ def initialize_set(set_id=None, set_name=None):
         if latest_game:
             st.session_state.game_id, st.session_state.game_number = latest_game
             restore_game_state()
-        else: # Set exists but has no games
+        else:
             st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
             st.session_state.game_number = 1
             st.session_state.current_frame = 1
@@ -313,7 +313,6 @@ def restore_game_state():
     try:
         latest_shot = con.execute("SELECT * FROM shots WHERE game_id = ? ORDER BY id DESC LIMIT 1", [st.session_state.game_id]).fetchone()
         if not latest_shot:
-            # This is a new game in an existing set
             st.session_state.current_frame = 1
             st.session_state.current_shot = 1
             st.session_state.pins_left_after_first_shot = []
@@ -488,6 +487,8 @@ if st.session_state.game_over:
     st.success("🎉 Game Over! Start a new game to continue.")
 else:
     st.subheader(f"Frame {st.session_state.current_frame} - Shot {st.session_state.current_shot}")
+    
+    # --- Lane Calculation & Display ---
     col1, col2 = st.columns(2)
     with col1:
         shot_result_options = []
@@ -501,15 +502,21 @@ else:
         else:
             shot_result_options = ["Strike", "Leave"] if st.session_state.current_shot == 1 else ["Spare", "Open"]
         st.radio("Shot Result", shot_result_options, key="shot_result", horizontal=True)
+    
     with col2:
         if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
         
+        # FIX: Ensure starting_lane is always available
+        if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
+            first_shot_db = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
+            st.session_state.starting_lane = first_shot_db[0] if first_shot_db else "Left Lane"
+
         is_odd_frame = st.session_state.current_frame % 2 != 0
         starts_on_left = st.session_state.starting_lane == "Left Lane"
         lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
         st.metric("Current Lane", lane_number)
-    
+
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
         st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
