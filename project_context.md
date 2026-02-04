@@ -201,3 +201,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** A "Bowling Ball" dropdown was added to the shot input area, populated with the balls from the user's arsenal.
     *   **Change:** The `shots` table was updated to include a `bowling_ball` column, and the `submit_shot` function was updated to save the selected ball.
     *   **Change:** The AI Assistant prompt was updated to include the bowling ball used for each shot.
+
+**Update (Follow-up):** The user requested that the application be pre-populated with a default list of bowling balls.
+
+16. **Default Arsenal:**
+    *   **Reasoning:** The user wanted to have a default list of bowling balls available in the application without having to enter them manually.
+    *   **Change:** The database setup logic was updated to check if the `arsenal` table is empty. If it is, the application is pre-populated with a default list of bowling balls.

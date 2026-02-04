@@ -100,6 +100,22 @@ con.execute("""
         ball_name VARCHAR PRIMARY KEY
     );
 """)
+
+# Pre-populate the arsenal if it's empty
+arsenal_count = con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0]
+if arsenal_count == 0:
+    default_balls = [
+        "Storm Phaze II - Pin Down",
+        "Storm IQ Tour - Pin Down",
+        "Roto Grip Attention Star - Pin Up",
+        "Storm Lightning Blackout - Pin Up",
+        "Storm Absolute - Pin Up",
+        "Brunswick Prism - Pin Up"
+    ]
+    for ball in default_balls:
+        con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (ball,))
+    con.commit()
+
 # Backwards compatibility
 try:
     con.execute("ALTER TABLE shots ADD COLUMN bowling_ball VARCHAR;")
