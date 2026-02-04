@@ -10,7 +10,7 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- AI Logic ---
-def get_ai_suggestion(api_key, df_set):
+def get_ai_suggestion(api_key, df_set, arsenal):
     """
     Analyzes game data from a set and provides a suggestion for the next shot.
     """
@@ -19,20 +19,24 @@ def get_ai_suggestion(api_key, df_set):
         model = genai.GenerativeModel('models/gemini-flash-latest')
         df_set = df_set.sort_values(by=['game_number', 'id'])
         data_summary = df_set.to_string()
+        arsenal_summary = ", ".join(arsenal)
 
         prompt = f"""
-        You are an expert bowling coach. Your task is to analyze a bowler's recent performance across a set of games and provide a strategic suggestion for the next shot.
+        You are an expert bowling coach. Your task is to analyze a bowler's recent performance and provide a strategic suggestion for the next shot, including potential ball changes.
 
-        Analyze the following data, which represents all shots taken in the current set of games, sorted chronologically:
+        Analyze the following data, which represents all shots taken in the current set of games:
         {data_summary}
 
+        Here is the bowler's current arsenal of bowling balls:
+        {arsenal_summary}
+
         THINGS TO CONSIDER:
-        1.  **Look for Patterns Across Games:** The key is to see how the lane conditions are changing over the entire session. If the bowler was striking on the left lane in game 1 but is now leaving 10-pins in game 3 on the same lane, the oil is breaking down. Your advice should reflect this trend.
-        2.  **Analyze Ball Reaction:** The `ball_reaction` notes are crucial. A pattern of "breaking early" or "not finishing" across several frames is a strong signal for an adjustment.
-        3.  **Provide Actionable Advice:** Your suggestion should be clear, concise, and based on the most recent data. For example: "In the last game, you started leaving the 4-pin on the right lane. This game, it happened again. The lanes are getting drier. For your next shot on the right lane, I suggest moving your feet 2 boards right to find more oil."
+        1.  **Look for Patterns Across Games & Balls:** If the bowler is leaving 10-pins with their "Storm Phaze II", but was striking with the "Roto Grip Attention Star" on the same lane earlier, it might be time to switch back.
+        2.  **Analyze Ball Reaction:** The `ball_reaction` notes are crucial. If the notes for a specific ball consistently say "breaking early" or "too much hook", it's a strong signal to switch to a weaker ball (e.g., one with a "Pin Up" layout or a less aggressive coverstock).
+        3.  **Suggest Specific Ball Changes:** Your advice should be actionable. Don't just say "change balls." Suggest a specific ball from the arsenal and explain why. For example: "Your 'Storm Phaze II' is starting to hook too early on the right lane. I recommend switching to your 'Storm IQ Tour' to get more length."
 
         YOUR TASK:
-        Based on all the data provided for the set, what is your single most important suggestion for the next shot? Explain your reasoning, focusing on the most recent frames as the primary evidence.
+        Based on all the data, what is your single most important suggestion for the next shot? This could be a move on the lane OR a ball change. Explain your reasoning.
         """
         response = model.generate_content(prompt)
         return response.text
@@ -43,6 +47,7 @@ def get_ai_analysis(api_key, df_game):
     """
     Performs a post-game analysis and provides practice recommendations.
     """
+    # This function can also be enhanced to consider ball usage in the future.
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('models/gemini-flash-latest')
@@ -83,18 +88,24 @@ con.execute("""
         pins_knocked_down VARCHAR,
         pins_left VARCHAR,
         lane_number VARCHAR,
+        bowling_ball VARCHAR,
         arrows_pos INTEGER,
         breakpoint_pos INTEGER,
         ball_reaction VARCHAR,
         shot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 """)
-for col, col_type in {'set_id': 'VARCHAR', 'set_name': 'VARCHAR'}.items():
-    try:
-        con.execute(f"ALTER TABLE shots ADD COLUMN {col} {col_type};")
-        con.commit()
-    except duckdb.Error:
-        pass
+con.execute("""
+    CREATE TABLE IF NOT EXISTS arsenal (
+        ball_name VARCHAR PRIMARY KEY
+    );
+""")
+# Backwards compatibility
+try:
+    con.execute("ALTER TABLE shots ADD COLUMN bowling_ball VARCHAR;")
+    con.commit()
+except duckdb.Error:
+    pass
 
 # --- Scoring Logic ---
 def get_pins_from_str(pins_str):
@@ -435,6 +446,22 @@ with st.sidebar.expander("☁️ Azure Cloud Storage"):
         except Exception as e:
             st.error(f"Could not list Azure blobs: {e}")
 
+with st.sidebar.expander("🎳 Manage Arsenal"):
+    arsenal = [row[0] for row in con.execute("SELECT ball_name FROM arsenal ORDER BY ball_name").fetchall()]
+    st.multiselect("Balls in Bag", options=arsenal, default=arsenal, key="balls_in_bag")
+    
+    new_ball_name = st.text_input("Add New Ball to Arsenal")
+    if st.button("Add Ball"):
+        if new_ball_name and new_ball_name not in arsenal:
+            con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (new_ball_name,))
+            con.commit()
+            st.success(f"Added '{new_ball_name}' to your arsenal.")
+            st.rerun()
+        elif not new_ball_name:
+            st.warning("Please enter a ball name.")
+        else:
+            st.warning(f"'{new_ball_name}' is already in your arsenal.")
+
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
@@ -515,6 +542,9 @@ else:
         lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
         st.markdown(f"**Current Lane:** {lane_number}")
 
+    # Ball Selection
+    st.selectbox("Bowling Ball", options=st.session_state.get('balls_in_bag', []), key="bowling_ball")
+
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
         st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
@@ -575,8 +605,8 @@ else:
         pins_left_standing_str = ", ".join(map(str, pins_left_standing))
 
         con.execute(
-            "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, arrows, breakpoint, st.session_state.ball_reaction)
+            "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, st.session_state.bowling_ball, arrows, breakpoint, st.session_state.ball_reaction)
         )
         con.commit()
         
@@ -624,7 +654,7 @@ else:
         if st.button("Get AI Suggestion for Next Shot"):
             if not df_set.empty:
                 with st.spinner("🤖 Calling the coach for advice..."):
-                    suggestion = get_ai_suggestion(api_key, df_set)
+                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []))
                     st.markdown(suggestion)
             else:
                 st.info("Submit some shots first.")

@@ -191,3 +191,13 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The broken pin reference image was replaced with a clear, text-based diagram.
     *   **Change:** The pin selection checkboxes were replaced with a single, space-saving multiselect dropdown menu.
     *   **Change:** The "Current Lane" display was changed from a large metric to a smaller, more subtle markdown element to reduce its visual prominence.
+
+**Update (Follow-up):** The user requested the ability to track which bowling ball is used for each shot.
+
+15. **Bowling Ball Tracking:**
+    *   **Reasoning:** The user wanted to track which bowling ball is used for each shot to improve the AI Assistant's recommendations.
+    *   **Change:** A new `arsenal` table was added to the local database to store a list of the user's bowling balls.
+    *   **Change:** A "Manage Arsenal" section was added to the sidebar to allow the user to add new balls to their arsenal.
+    *   **Change:** A "Bowling Ball" dropdown was added to the shot input area, populated with the balls from the user's arsenal.
+    *   **Change:** The `shots` table was updated to include a `bowling_ball` column, and the `submit_shot` function was updated to save the selected ball.
+    *   **Change:** The AI Assistant prompt was updated to include the bowling ball used for each shot.
