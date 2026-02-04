@@ -127,3 +127,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The application was trying to access Azure credentials from environment variables (`os.environ`) instead of using Streamlit's recommended secrets management (`st.secrets`).
     *   **Change:** The `upload_set_to_azure` function was updated to fetch the `AZURE_STORAGE_ACCOUNT_NAME` and `AZURE_STORAGE_CONTAINER_NAME` from `st.secrets`.
     *   **Change:** Clear error handling was added to guide the user on how to configure their secrets if they are not found.
+
+**Update (Follow-up):** The user reported a warning about calling `st.rerun()` within a callback.
+
+6.  **Removed Redundant `st.rerun()`:**
+    *   **Reasoning:** The `submit_shot` function, used as a button callback, contained an unnecessary `st.rerun()` call. Streamlit automatically reruns the script after a callback, making the explicit call redundant and causing a warning.
+    *   **Change:** The `st.rerun()` line was removed from the end of the `submit_shot` function to eliminate the warning and align with Streamlit's best practices.

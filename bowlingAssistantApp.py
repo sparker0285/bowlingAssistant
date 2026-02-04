@@ -191,7 +191,6 @@ def calculate_scores(df):
 def upload_set_to_azure(con, set_id):
     """Uploads all games in a set to Azure Blob Storage using credentials from st.secrets."""
     try:
-        # Check for secrets
         if "AZURE_STORAGE_ACCOUNT_NAME" not in st.secrets or "AZURE_STORAGE_CONTAINER_NAME" not in st.secrets:
             st.error("Azure credentials not found. Please add AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_CONTAINER_NAME to your Streamlit secrets.")
             return
@@ -254,7 +253,7 @@ if set_map:
     try:
         current_set_index = list(set_map.keys()).index(st.session_state.set_id)
     except ValueError:
-        current_set_index = 0 # Default to the first item if current set_id is not in map
+        current_set_index = 0
     
     selected_set_name = st.sidebar.selectbox(
         "Select Set to View/Analyze",
@@ -271,7 +270,7 @@ if set_map:
             st.session_state.game_id, st.session_state.game_number = latest_game
             first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [latest_game[0]]).fetchone()
             st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
-        else: # If set exists but has no games
+        else:
             initialize_new_set(selected_set_name)
         st.rerun()
 
@@ -286,7 +285,7 @@ if st.sidebar.button("Start New Set"):
         match = re.search(r'_(\d+)$', last_set_name)
         if match:
             next_seq = int(match.group(1)) + 1
-        else: # First one was un-numbered
+        else:
             next_seq = 2
 
     new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
@@ -309,7 +308,6 @@ with st.sidebar.expander("⚠️ Danger Zone"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
         con.commit()
         st.success(f"Set '{st.session_state.set_name}' has been deleted.")
-        # Reset to a new, clean set
         initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
         st.rerun()
 
@@ -432,7 +430,6 @@ else:
                 else: st.session_state.game_over = True
             else:
                 st.session_state.game_over = True
-        st.rerun()
 
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 
