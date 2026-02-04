@@ -207,3 +207,12 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 16. **Default Arsenal:**
     *   **Reasoning:** The user wanted to have a default list of bowling balls available in the application without having to enter them manually.
     *   **Change:** The database setup logic was updated to check if the `arsenal` table is empty. If it is, the application is pre-populated with a default list of bowling balls.
+
+**Update (Follow-up):** The user requested a more practical way to manage their bowling ball arsenal for a given session.
+
+17. **"In the Bag" Arsenal Management:**
+    *   **Reasoning:** The user wanted a way to specify which balls from their full arsenal they have with them for a particular session.
+    *   **Change:** The "Manage Arsenal" sidebar section was refactored. It now allows the user to select which balls are "in the bag" for the current session using a multiselect box.
+    *   **Change:** The main "Bowling Ball" dropdown in the shot entry form is now filtered to only show the balls selected as being "in the bag."
+    *   **Change:** The application now remembers the last used ball and defaults to it in the dropdown, saving a click on each shot.
+    *   **Change:** The AI Assistant is now only provided with the list of balls currently in the bag, ensuring its recommendations are relevant to the user's available equipment.

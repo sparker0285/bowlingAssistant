@@ -10,7 +10,7 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- AI Logic ---
-def get_ai_suggestion(api_key, df_set, arsenal):
+def get_ai_suggestion(api_key, df_set, balls_in_bag):
     """
     Analyzes game data from a set and provides a suggestion for the next shot.
     """
@@ -19,21 +19,21 @@ def get_ai_suggestion(api_key, df_set, arsenal):
         model = genai.GenerativeModel('models/gemini-flash-latest')
         df_set = df_set.sort_values(by=['game_number', 'id'])
         data_summary = df_set.to_string()
-        arsenal_summary = ", ".join(arsenal)
+        in_bag_summary = ", ".join(balls_in_bag)
 
         prompt = f"""
-        You are an expert bowling coach. Your task is to analyze a bowler's recent performance and provide a strategic suggestion for the next shot, including potential ball changes.
+        You are an expert bowling coach. Your task is to analyze a bowler's recent performance and provide a strategic suggestion for the next shot, including potential ball changes from the available equipment.
 
         Analyze the following data, which represents all shots taken in the current set of games:
         {data_summary}
 
-        Here is the bowler's current arsenal of bowling balls:
-        {arsenal_summary}
+        Here are the bowling balls the bowler has with them right now:
+        {in_bag_summary}
 
         THINGS TO CONSIDER:
         1.  **Look for Patterns Across Games & Balls:** If the bowler is leaving 10-pins with their "Storm Phaze II", but was striking with the "Roto Grip Attention Star" on the same lane earlier, it might be time to switch back.
-        2.  **Analyze Ball Reaction:** The `ball_reaction` notes are crucial. If the notes for a specific ball consistently say "breaking early" or "too much hook", it's a strong signal to switch to a weaker ball (e.g., one with a "Pin Up" layout or a less aggressive coverstock).
-        3.  **Suggest Specific Ball Changes:** Your advice should be actionable. Don't just say "change balls." Suggest a specific ball from the arsenal and explain why. For example: "Your 'Storm Phaze II' is starting to hook too early on the right lane. I recommend switching to your 'Storm IQ Tour' to get more length."
+        2.  **Analyze Ball Reaction:** The `ball_reaction` notes are crucial. If the notes for a specific ball consistently say "breaking early" or "too much hook", it's a strong signal to switch to a different ball from their bag.
+        3.  **Suggest Specific Ball Changes:** Your advice must be actionable. Suggest a specific ball *from the list of balls they have with them*. For example: "Your 'Storm Phaze II' is starting to hook too early on the right lane. I recommend switching to your 'Storm IQ Tour' to get more length."
 
         YOUR TASK:
         Based on all the data, what is your single most important suggestion for the next shot? This could be a move on the lane OR a ball change. Explain your reasoning.
@@ -47,7 +47,6 @@ def get_ai_analysis(api_key, df_game):
     """
     Performs a post-game analysis and provides practice recommendations.
     """
-    # This function can also be enhanced to consider ball usage in the future.
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('models/gemini-flash-latest')
@@ -102,21 +101,15 @@ con.execute("""
 """)
 
 # Pre-populate the arsenal if it's empty
-arsenal_count = con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0]
-if arsenal_count == 0:
+if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
     default_balls = [
-        "Storm Phaze II - Pin Down",
-        "Storm IQ Tour - Pin Down",
-        "Roto Grip Attention Star - Pin Up",
-        "Storm Lightning Blackout - Pin Up",
-        "Storm Absolute - Pin Up",
-        "Brunswick Prism - Pin Up"
+        "Storm Phaze II - Pin Down", "Storm IQ Tour - Pin Down", "Roto Grip Attention Star - Pin Up",
+        "Storm Lightning Blackout - Pin Up", "Storm Absolute - Pin Up", "Brunswick Prism - Pin Up"
     ]
     for ball in default_balls:
         con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (ball,))
     con.commit()
 
-# Backwards compatibility
 try:
     con.execute("ALTER TABLE shots ADD COLUMN bowling_ball VARCHAR;")
     con.commit()
@@ -221,7 +214,6 @@ def calculate_scores(df):
 
 # --- Azure Integration ---
 def get_azure_client():
-    """Creates and returns a BlobServiceClient, returns None on failure."""
     try:
         container_name = st.secrets.get("AZURE_STORAGE_CONTAINER_NAME")
         connection_string = st.secrets.get("AZURE_STORAGE_CONNECTION_STRING")
@@ -234,10 +226,7 @@ def get_azure_client():
         if connection_string:
             return BlobServiceClient.from_connection_string(connection_string)
         elif account_name:
-            return BlobServiceClient(
-                account_url=f"https://{account_name}.blob.core.windows.net",
-                credential=DefaultAzureCredential()
-            )
+            return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net", credential=DefaultAzureCredential())
         else:
             st.error("Azure credentials not found. Please add `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME`.")
             return None
@@ -246,7 +235,6 @@ def get_azure_client():
         return None
 
 def upload_set_to_azure(con, set_id):
-    """Uploads all games in a set to Azure Blob Storage."""
     blob_service_client = get_azure_client()
     if not blob_service_client: return
 
@@ -270,7 +258,6 @@ def upload_set_to_azure(con, set_id):
         st.error(f"An unexpected error occurred during upload: {e}")
 
 def download_and_load_set(blob_name):
-    """Downloads a set from Azure and loads it into the local DB."""
     blob_service_client = get_azure_client()
     if not blob_service_client: return
 
@@ -307,7 +294,6 @@ st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Set Tracker")
 
 def initialize_set(set_id=None, set_name=None):
-    """Initializes a new or existing set."""
     if set_id is None:
         st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         st.session_state.set_name = set_name or f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
@@ -336,7 +322,6 @@ def initialize_set(set_id=None, set_name=None):
             st.session_state.game_over = False
 
 def restore_game_state():
-    """Restores the state of the current game from the database."""
     try:
         latest_shot = con.execute("SELECT * FROM shots WHERE game_id = ? ORDER BY id DESC LIMIT 1", [st.session_state.game_id]).fetchone()
         if not latest_shot:
@@ -443,6 +428,32 @@ if st.sidebar.button("Rename Set"):
         st.session_state.set_name = new_name
         st.rerun()
 
+with st.sidebar.expander("🎳 Manage Arsenal"):
+    st.markdown("**Your Full Arsenal**")
+    arsenal = [row[0] for row in con.execute("SELECT ball_name FROM arsenal ORDER BY ball_name").fetchall()]
+    
+    if 'balls_in_bag' not in st.session_state:
+        st.session_state.balls_in_bag = arsenal
+
+    st.multiselect(
+        "Select balls in your bag for this session:", 
+        options=arsenal, 
+        key="balls_in_bag"
+    )
+
+    new_ball_name = st.text_input("Add New Ball to Arsenal")
+    if st.button("Add Ball"):
+        if new_ball_name and new_ball_name not in arsenal:
+            con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (new_ball_name,))
+            con.commit()
+            st.success(f"Added '{new_ball_name}' to your arsenal.")
+            st.session_state.balls_in_bag.append(new_ball_name)
+            st.rerun()
+        elif not new_ball_name:
+            st.warning("Please enter a ball name.")
+        else:
+            st.warning(f"'{new_ball_name}' is already in your arsenal.")
+
 with st.sidebar.expander("☁️ Azure Cloud Storage"):
     if st.button("Save Current Set to Azure"):
         upload_set_to_azure(con, st.session_state.set_id)
@@ -461,22 +472,6 @@ with st.sidebar.expander("☁️ Azure Cloud Storage"):
                 st.write("No sets found in Azure.")
         except Exception as e:
             st.error(f"Could not list Azure blobs: {e}")
-
-with st.sidebar.expander("🎳 Manage Arsenal"):
-    arsenal = [row[0] for row in con.execute("SELECT ball_name FROM arsenal ORDER BY ball_name").fetchall()]
-    st.multiselect("Balls in Bag", options=arsenal, default=arsenal, key="balls_in_bag")
-    
-    new_ball_name = st.text_input("Add New Ball to Arsenal")
-    if st.button("Add Ball"):
-        if new_ball_name and new_ball_name not in arsenal:
-            con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (new_ball_name,))
-            con.commit()
-            st.success(f"Added '{new_ball_name}' to your arsenal.")
-            st.rerun()
-        elif not new_ball_name:
-            st.warning("Please enter a ball name.")
-        else:
-            st.warning(f"'{new_ball_name}' is already in your arsenal.")
 
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
@@ -559,7 +554,12 @@ else:
         st.markdown(f"**Current Lane:** {lane_number}")
 
     # Ball Selection
-    st.selectbox("Bowling Ball", options=st.session_state.get('balls_in_bag', []), key="bowling_ball")
+    balls_in_bag = st.session_state.get('balls_in_bag', [])
+    last_used_ball = st.session_state.get('last_used_ball')
+    default_index = 0
+    if last_used_ball and last_used_ball in balls_in_bag:
+        default_index = balls_in_bag.index(last_used_ball)
+    st.selectbox("Bowling Ball", options=balls_in_bag, key="bowling_ball", index=default_index)
 
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
@@ -619,6 +619,7 @@ else:
                 pins_knocked_down_str = ", ".join(map(str, knocked_down))
 
         pins_left_standing_str = ", ".join(map(str, pins_left_standing))
+        st.session_state.last_used_ball = st.session_state.bowling_ball
 
         con.execute(
             "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
