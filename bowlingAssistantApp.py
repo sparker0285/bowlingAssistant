@@ -279,39 +279,53 @@ def download_and_load_set(blob_name):
 st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Set Tracker")
 
-def initialize_new_set(new_set_name):
-    """Resets session state for a new set."""
-    st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    st.session_state.set_name = new_set_name
-    st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    st.session_state.game_number = 1
-    st.session_state.current_frame = 1
-    st.session_state.current_shot = 1
-    st.session_state.pins_left_after_first_shot = []
-    st.session_state.starting_lane = "Left Lane"
-    st.session_state.game_over = False
+def initialize_set(set_id=None, set_name=None):
+    """Initializes a new or existing set."""
+    if set_id is None:
+        st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        st.session_state.set_name = set_name or f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
+        st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        st.session_state.game_number = 1
+        st.session_state.current_frame = 1
+        st.session_state.current_shot = 1
+        st.session_state.pins_left_after_first_shot = []
+        st.session_state.starting_lane = "Left Lane"
+        st.session_state.game_over = False
+    else:
+        st.session_state.set_id = set_id
+        st.session_state.set_name = set_name
+        
+        latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC, id DESC LIMIT 1", [set_id]).fetchone()
+        if latest_game:
+            st.session_state.game_id, st.session_state.game_number = latest_game
+            restore_game_state()
+        else: # Set exists but has no games
+            st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+            st.session_state.game_number = 1
+            st.session_state.current_frame = 1
+            st.session_state.current_shot = 1
+            st.session_state.pins_left_after_first_shot = []
+            st.session_state.starting_lane = "Left Lane"
+            st.session_state.game_over = False
 
-def restore_state():
-    """Restores the full application state from the database on initial load."""
-    if st.session_state.get('state_restored', False):
-        return
-
+def restore_game_state():
+    """Restores the state of the current game from the database."""
     try:
-        latest_shot = con.execute("SELECT * FROM shots ORDER BY id DESC LIMIT 1").fetchone()
+        latest_shot = con.execute("SELECT * FROM shots WHERE game_id = ? ORDER BY id DESC LIMIT 1", [st.session_state.game_id]).fetchone()
         if not latest_shot:
-            initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+            # This is a new game in an existing set
+            st.session_state.current_frame = 1
+            st.session_state.current_shot = 1
+            st.session_state.pins_left_after_first_shot = []
+            st.session_state.starting_lane = "Left Lane"
+            st.session_state.game_over = False
             return
 
         (id, set_id, set_name, game_id, game_number, frame, shot, 
          shot_result, _, pins_left_str, _, *__) = latest_shot
 
         if frame is None or shot is None:
-            raise ValueError("Corrupted data in last shot (frame or shot is null).")
-        
-        st.session_state.set_id = set_id
-        st.session_state.set_name = set_name
-        st.session_state.game_id = game_id
-        st.session_state.game_number = game_number
+            raise ValueError("Corrupted data in last shot.")
 
         next_frame, next_shot = frame, shot
         pins_left = get_pins_from_str(pins_left_str)
@@ -347,17 +361,15 @@ def restore_state():
         first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id]).fetchone()
         st.session_state.starting_lane = first_shot_of_game[0] if first_shot_of_game else "Left Lane"
         
-        st.info(f"Restored session to Set '{set_name}', Game {game_number}.")
-
     except Exception as e:
-        st.warning(f"Could not restore previous session due to an error. Starting a new set.")
-        print(f"State restoration error: {e}") 
-        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
-    
-    finally:
-        st.session_state.state_restored = True
+        st.warning(f"Could not restore game state due to an error: {e}. Starting a fresh game.")
+        st.session_state.current_frame = 1
+        st.session_state.current_shot = 1
+        st.session_state.pins_left_after_first_shot = []
+        st.session_state.game_over = False
 
-restore_state()
+if 'set_id' not in st.session_state:
+    initialize_set()
 
 # --- Sidebar ---
 st.sidebar.header("Set Management")
@@ -378,8 +390,7 @@ if set_map:
         selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_name][0]
 
         if selected_set_id != st.session_state.set_id:
-            st.session_state.set_id = selected_set_id
-            st.session_state.state_restored = False
+            initialize_set(selected_set_id, selected_set_name)
             st.rerun()
 
 if st.sidebar.button("Start New Set"):
@@ -395,7 +406,7 @@ if st.sidebar.button("Start New Set"):
         else: next_seq = 2
 
     new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
-    initialize_new_set(new_set_name)
+    initialize_set(set_name=new_set_name)
     st.rerun()
 
 new_name = st.sidebar.text_input("Rename Current Set", value=st.session_state.get('set_name', ''))
@@ -430,7 +441,7 @@ with st.sidebar.expander("⚠️ Danger Zone"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
         con.commit()
         st.success(f"Set '{st.session_state.set_name}' has been deleted.")
-        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+        initialize_set()
         st.rerun()
 
 # --- Game Selection & Data Fetching ---
@@ -448,7 +459,9 @@ selected_game_number = game_map[selected_game_name]
 
 if selected_game_number != st.session_state.game_number:
     st.session_state.game_number = selected_game_number
-    st.session_state.state_restored = False
+    game_id_res = df_set[df_set['game_number'] == selected_game_number]['game_id'].iloc[0]
+    st.session_state.game_id = game_id_res
+    restore_game_state()
     st.rerun()
 
 if st.sidebar.button("Start New Game in Set"):
@@ -491,7 +504,11 @@ else:
     with col2:
         if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
-        st.metric("Current Lane", st.session_state.get('lane_number', 'N/A'))
+        
+        is_odd_frame = st.session_state.current_frame % 2 != 0
+        starts_on_left = st.session_state.starting_lane == "Left Lane"
+        lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
+        st.metric("Current Lane", lane_number)
     
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
@@ -515,10 +532,6 @@ else:
             pins_selected[i] = st.checkbox(str(i), key=f"pin_{i}", disabled=disable_pin)
 
     def submit_shot():
-        is_odd_frame = st.session_state.current_frame % 2 != 0
-        starts_on_left = st.session_state.starting_lane == "Left Lane"
-        lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
-
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
         arrows = st.session_state.arrows_pos if use_trajectory else None
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None

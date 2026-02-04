@@ -169,3 +169,11 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The `restore_state` function was still vulnerable to `TypeError` crashes if it encountered corrupted data (e.g., a `None` value for a frame number) in the database.
     *   **Change:** The entire `restore_state` function is now wrapped in a `try...except` block. If any error occurs during the process, the exception is caught, a warning is displayed, and the application initializes a fresh, clean set. This ensures the app always starts successfully, regardless of the state of the local database.
     *   **Change:** The `state_restored` flag is now set in a `finally` block to guarantee it is always handled correctly.
+
+**Update (Follow-up):** The user reported an infinite loading loop on startup.
+
+12. **Infinite Loop Fix:**
+    *   **Reasoning:** The state management logic was causing an infinite loop on startup due to conflicting state updates between the set selection and state restoration functions.
+    *   **Change:** The state management was refactored to eliminate the conflicting logic. The `restore_state` function was improved to correctly restore the state of the most recently selected set and game, preventing the application from getting stuck in a loop.
+    *   **Change:** The `initialize_set` function was created to centralize the logic for initializing a new or existing set.
+    *   **Change:** The `restore_game_state` function was created to restore the state of the current game from the database.
