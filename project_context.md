@@ -162,3 +162,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The previous state management logic was too complex and could lead to data corruption.
     *   **Change:** The logic for advancing the frame and shot was moved back into the `submit_shot` function, making the state updates more direct and reliable.
     *   **Change:** The `restore_state` function was simplified to only run on initial app load, and a safeguard was added to handle corrupted data by starting a new set.
+
+**Update (Follow-up):** The user reported a recurring `TypeError` on startup.
+
+11. **Bulletproof State Restoration:**
+    *   **Reasoning:** The `restore_state` function was still vulnerable to `TypeError` crashes if it encountered corrupted data (e.g., a `None` value for a frame number) in the database.
+    *   **Change:** The entire `restore_state` function is now wrapped in a `try...except` block. If any error occurs during the process, the exception is caught, a warning is displayed, and the application initializes a fresh, clean set. This ensures the app always starts successfully, regardless of the state of the local database.
+    *   **Change:** The `state_restored` flag is now set in a `finally` block to guarantee it is always handled correctly.
