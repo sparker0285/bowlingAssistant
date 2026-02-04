@@ -111,17 +111,15 @@ def calculate_scores(df):
         if s['shot_result'] == 'Strike':
             raw_pins.append(10)
         elif s['shot_result'] == 'Spare':
-            # Find the first shot of the same frame to determine pins knocked down
             shot1_df = df[(df['frame_number'] == s['frame_number']) & (df['shot_number'] == 1)]
             if not shot1_df.empty:
                 shot1_pins_left_str = shot1_df['pins_left'].iloc[0]
                 raw_pins.append(len(get_pins_from_str(shot1_pins_left_str)))
-            else: # Should not happen in valid data
+            else:
                 raw_pins.append(0) 
-        else: # Open frame
+        else:
             pins_knocked_down_list = get_pins_from_str(s['pins_knocked_down'])
             raw_pins.append(len(pins_knocked_down_list))
-
 
     frame_scores = [None] * 10
     total_score = 0
@@ -195,29 +193,38 @@ def calculate_scores(df):
 
 
 # --- Azure Integration ---
-def upload_set_to_azure(con, set_id):
-    """Uploads all games in a set to Azure Blob Storage using credentials from st.secrets."""
+def get_azure_client():
+    """Creates and returns a BlobServiceClient, returns None on failure."""
     try:
         container_name = st.secrets.get("AZURE_STORAGE_CONTAINER_NAME")
         connection_string = st.secrets.get("AZURE_STORAGE_CONNECTION_STRING")
         account_name = st.secrets.get("AZURE_STORAGE_ACCOUNT_NAME")
 
         if not container_name:
-            st.error("Azure secret `AZURE_STORAGE_CONTAINER_NAME` not found. Please add it to your Streamlit secrets.")
-            return
+            st.error("Azure secret `AZURE_STORAGE_CONTAINER_NAME` not found.")
+            return None
 
-        blob_service_client = None
         if connection_string:
-            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+            return BlobServiceClient.from_connection_string(connection_string)
         elif account_name:
-            blob_service_client = BlobServiceClient(
+            return BlobServiceClient(
                 account_url=f"https://{account_name}.blob.core.windows.net",
                 credential=DefaultAzureCredential()
             )
         else:
-            st.error("Azure credentials not found. Please add either `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME` to your Streamlit secrets.")
-            return
+            st.error("Azure credentials not found. Please add `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME`.")
+            return None
+    except Exception as e:
+        st.error(f"Failed to connect to Azure: {e}")
+        return None
 
+def upload_set_to_azure(con, set_id):
+    """Uploads all games in a set to Azure Blob Storage."""
+    blob_service_client = get_azure_client()
+    if not blob_service_client: return
+
+    try:
+        container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
         df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id]).fetchdf()
         if df.empty:
             st.warning("No data in this set to save.")
@@ -232,14 +239,108 @@ def upload_set_to_azure(con, set_id):
         blob_client.upload_blob(csv_buffer.getvalue(), overwrite=True)
         
         st.success(f"Set '{set_name}' saved successfully to Azure.")
+    except Exception as e:
+        st.error(f"An unexpected error occurred during upload: {e}")
+
+def download_and_load_set(blob_name):
+    """Downloads a set from Azure and loads it into the local DB."""
+    blob_service_client = get_azure_client()
+    if not blob_service_client: return
+
+    try:
+        container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        
+        downloader = blob_client.download_blob()
+        df = pd.read_csv(io.BytesIO(downloader.readall()))
+
+        if 'set_id' not in df.columns:
+            st.error("Downloaded file is not a valid set file.")
+            return
+
+        # Delete existing data for this set_id to prevent duplicates
+        set_id_to_load = df['set_id'].iloc[0]
+        con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
+        
+        # Use DuckDB's efficient DataFrame insertion
+        con.register('df_to_insert', df)
+        con.execute('INSERT INTO shots SELECT * FROM df_to_insert')
+        con.unregister('df_to_insert')
+        con.commit()
+
+        st.success(f"Successfully loaded set '{df['set_name'].iloc[0]}'.")
+        # Set the loaded set as the current one
+        st.session_state.set_id = set_id_to_load
+        st.session_state.set_name = df['set_name'].iloc[0]
+        st.rerun()
 
     except Exception as e:
-        st.error(f"An unexpected error occurred while uploading to Azure: {e}")
+        st.error(f"Failed to download or load set: {e}")
 
 
 # --- Main Application ---
 st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Set Tracker")
+
+def restore_state():
+    """Restores the full application state from the database."""
+    if 'state_restored' in st.session_state:
+        return
+
+    latest_shot = con.execute("SELECT * FROM shots ORDER BY id DESC LIMIT 1").fetchone()
+    if not latest_shot:
+        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+        st.session_state.state_restored = True
+        return
+
+    # Unpack latest shot data
+    (id, set_id, set_name, game_id, game_number, frame, shot, 
+     shot_result, pins_knocked, pins_left_str, lane, *_) = latest_shot
+
+    st.session_state.set_id = set_id
+    st.session_state.set_name = set_name
+    st.session_state.game_id = game_id
+    st.session_state.game_number = game_number
+
+    # Determine next shot based on last one
+    next_frame, next_shot = frame, shot
+    pins_left = get_pins_from_str(pins_left_str)
+    game_over = False
+
+    if frame < 10:
+        if shot == 2 or shot_result == "Strike":
+            next_frame += 1
+            next_shot = 1
+            pins_left = []
+        else:
+            next_shot = 2
+    else: # Frame 10
+        shots_in_frame10 = con.execute("SELECT shot_number, shot_result FROM shots WHERE game_id = ? AND frame_number = 10", [game_id]).fetchall()
+        shot1_res = shots_in_frame10[0][1] if len(shots_in_frame10) > 0 else ''
+        shot2_res = shots_in_frame10[1][1] if len(shots_in_frame10) > 1 else ''
+
+        if shot == 1:
+            next_shot = 2
+            if shot_result == "Strike": pins_left = []
+        elif shot == 2:
+            if shot1_res == "Strike" or shot_result == "Spare":
+                next_shot = 3
+                pins_left = []
+            else: game_over = True
+        else: # shot == 3
+            game_over = True
+
+    st.session_state.current_frame = next_frame
+    st.session_state.current_shot = next_shot
+    st.session_state.pins_left_after_first_shot = pins_left
+    st.session_state.game_over = game_over
+    
+    first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id]).fetchone()
+    st.session_state.starting_lane = first_shot_of_game[0] if first_shot_of_game else "Left Lane"
+    
+    st.session_state.state_restored = True
+    st.info(f"Restored session to Set '{set_name}', Game {game_number}.")
+
 
 def initialize_new_set(new_set_name):
     """Resets session state for a new set."""
@@ -252,9 +353,10 @@ def initialize_new_set(new_set_name):
     st.session_state.pins_left_after_first_shot = []
     st.session_state.starting_lane = "Left Lane"
     st.session_state.game_over = False
+    st.session_state.state_restored = True
 
-if 'set_id' not in st.session_state:
-    initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+
+restore_state()
 
 # --- Sidebar ---
 st.sidebar.header("Set Management")
@@ -270,23 +372,12 @@ if set_map:
     except ValueError:
         current_set_index = 0
     
-    selected_set_name = st.sidebar.selectbox(
-        "Select Set to View/Analyze",
-        options=list(set_map.values()),
-        index=current_set_index
-    )
+    selected_set_name = st.sidebar.selectbox("Select Set", options=list(set_map.values()), index=current_set_index)
     selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_name][0]
 
     if selected_set_id != st.session_state.set_id:
         st.session_state.set_id = selected_set_id
-        st.session_state.set_name = selected_set_name
-        latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC LIMIT 1", [selected_set_id]).fetchone()
-        if latest_game:
-            st.session_state.game_id, st.session_state.game_number = latest_game
-            first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [latest_game[0]]).fetchone()
-            st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
-        else:
-            initialize_new_set(selected_set_name)
+        st.session_state.state_restored = False # Force restore for the selected set
         st.rerun()
 
 if st.sidebar.button("Start New Set"):
@@ -298,10 +389,8 @@ if st.sidebar.button("Start New Set"):
     if existing_sets_today:
         last_set_name = existing_sets_today[0][0]
         match = re.search(r'_(\d+)$', last_set_name)
-        if match:
-            next_seq = int(match.group(1)) + 1
-        else:
-            next_seq = 2
+        if match: next_seq = int(match.group(1)) + 1
+        else: next_seq = 2
 
     new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
     initialize_new_set(new_set_name)
@@ -315,8 +404,25 @@ if st.sidebar.button("Rename Set"):
         st.session_state.set_name = new_name
         st.rerun()
 
-if st.sidebar.button("Save Set to Azure"):
-    upload_set_to_azure(con, st.session_state.set_id)
+with st.sidebar.expander("☁️ Azure Cloud Storage"):
+    if st.button("Save Set to Azure"):
+        upload_set_to_azure(con, st.session_state.set_id)
+    
+    azure_client = get_azure_client()
+    if azure_client:
+        try:
+            container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
+            container_client = azure_client.get_container_client(container_name)
+            blob_list = [b.name for b in container_client.list_blobs() if b.name.startswith('set-')]
+            if blob_list:
+                selected_blob = st.selectbox("Load Set from Azure", options=blob_list)
+                if st.button("Download and Load Set"):
+                    download_and_load_set(selected_blob)
+            else:
+                st.write("No sets found in Azure.")
+        except Exception as e:
+            st.error(f"Could not list Azure blobs: {e}")
+
 
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
@@ -337,19 +443,12 @@ game_map = {f"Game {g}": g for g in games_in_set}
 if st.session_state.game_number not in game_map.values():
     game_map[f"Game {st.session_state.game_number}"] = st.session_state.game_number
 
-selected_game_name = st.sidebar.selectbox(
-    "Select Game",
-    options=list(game_map.keys()),
-    index=list(game_map.values()).index(st.session_state.game_number)
-)
+selected_game_name = st.sidebar.selectbox("Select Game", options=list(game_map.keys()), index=list(game_map.values()).index(st.session_state.game_number))
 selected_game_number = game_map[selected_game_name]
 
 if selected_game_number != st.session_state.game_number:
     st.session_state.game_number = selected_game_number
-    game_id_res = df_set[df_set['game_number'] == selected_game_number]['game_id'].iloc[0]
-    st.session_state.game_id = game_id_res
-    first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id_res]).fetchone()
-    st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
+    st.session_state.state_restored = False # Force restore for selected game
     st.rerun()
 
 if st.sidebar.button("Start New Game in Set"):
@@ -359,7 +458,6 @@ if st.sidebar.button("Start New Game in Set"):
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
     st.session_state.game_over = False
-    st.session_state.starting_lane = "Left Lane"
     st.rerun()
 
 df_current_game = df_set[df_set['game_number'] == st.session_state.game_number] if not df_set.empty else pd.DataFrame()
@@ -393,17 +491,7 @@ else:
     with col2:
         if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
-            lane_number = st.session_state.starting_lane
-        else:
-            if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
-                first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
-                st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
-            
-            is_odd_frame = st.session_state.current_frame % 2 != 0
-            starts_on_left = st.session_state.starting_lane == "Left Lane"
-            lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
-        st.metric("Current Lane", lane_number)
-        st.session_state.lane_number = lane_number
+        st.metric("Current Lane", st.session_state.get('lane_number', 'N/A'))
     
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
@@ -412,55 +500,46 @@ else:
 
     st.text_input("Ball Reaction", key="ball_reaction")
     
-    # --- Pin Selection UI (FIXED) ---
     st.subheader("Pins Left Standing")
-    
     is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
     pins_available = st.session_state.get('pins_left_after_first_shot', [])
     
-    if st.session_state.current_shot == 1:
-        st.write("Select the pins **left standing** after your first shot.")
-    else:
-        st.write("Select the pins **still standing** (for an Open frame).")
+    if st.session_state.current_shot == 1: st.write("Select pins **left standing**.")
+    else: st.write("Select pins **still standing** (for an Open frame).")
 
     pins_selected = {}
     cols = st.columns(10)
     for i in range(1, 11):
-        disable_pin = False
-        if st.session_state.current_shot == 2:
-            # Disable pins that were already knocked down
-            if i not in pins_available:
-                disable_pin = True
-        # Always disable for spare or strike
-        if is_spare_or_strike:
-            disable_pin = True
-        
+        disable_pin = is_spare_or_strike or (st.session_state.current_shot == 2 and i not in pins_available)
         with cols[i-1]:
             pins_selected[i] = st.checkbox(str(i), key=f"pin_{i}", disabled=disable_pin)
 
-
     def submit_shot():
+        is_odd_frame = st.session_state.current_frame % 2 != 0
+        starts_on_left = st.session_state.starting_lane == "Left Lane"
+        lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
+
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
         arrows = st.session_state.arrows_pos if use_trajectory else None
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
         
         shot_res = st.session_state.shot_result
         pins_left_standing = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
-        pins_knocked_down_str = "N/A" # Default
+        pins_knocked_down_str = "N/A"
 
         if st.session_state.current_shot == 1:
             if shot_res == "Strike":
                 st.session_state.pins_left_after_first_shot = []
                 pins_knocked_down_str = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
-            else: # Leave
+            else:
                 st.session_state.pins_left_after_first_shot = pins_left_standing
                 knocked_down = [p for p in range(1, 11) if p not in pins_left_standing]
                 pins_knocked_down_str = ", ".join(map(str, knocked_down))
-        else: # Shot 2 (or 3)
+        else:
             prev_pins_left = st.session_state.get('pins_left_after_first_shot', [])
             if shot_res == "Spare":
                 pins_knocked_down_str = ", ".join(map(str, prev_pins_left))
-            else: # Open
+            else:
                 knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
                 pins_knocked_down_str = ", ".join(map(str, knocked_down))
 
@@ -468,37 +547,12 @@ else:
 
         con.execute(
             "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, st.session_state.lane_number, arrows, breakpoint, st.session_state.ball_reaction)
+            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, arrows, breakpoint, st.session_state.ball_reaction)
         )
         con.commit()
         
-        # --- State Transition ---
-        if st.session_state.current_frame < 10:
-            if st.session_state.current_shot == 2 or shot_res == "Strike":
-                st.session_state.current_frame += 1
-                st.session_state.current_shot = 1
-                st.session_state.pins_left_after_first_shot = []
-            else:
-                st.session_state.current_shot = 2
-        else: # Frame 10 logic
-            shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
-            shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
-            if st.session_state.current_shot == 1:
-                st.session_state.current_shot = 2
-                if shot_res == "Strike": st.session_state.pins_left_after_first_shot = []
-            elif st.session_state.current_shot == 2:
-                if shot1_res == "Strike" or shot_res == "Spare":
-                    st.session_state.current_shot = 3
-                    st.session_state.pins_left_after_first_shot = []
-                else: st.session_state.game_over = True
-            else:
-                st.session_state.game_over = True
+        st.session_state.state_restored = False
         
-        # Clear UI state
-        for i in range(1, 11):
-            st.session_state[f'pin_{i}'] = False
-        st.session_state.ball_reaction = ""
-
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 
 # --- Analytical Dashboard ---

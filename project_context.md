@@ -148,3 +148,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The `submit_shot` function was updated to correctly save the pins left after the first shot into the session state.
     *   **Change:** The UI was updated to dynamically enable and disable the pin checkboxes based on the current shot and frame context. For example, if "Spare" is selected, all pins are disabled. For an "Open" frame, only the pins left standing from the first shot are enabled.
     *   **Change:** The `submit_shot` function was also updated to clear the pin checkboxes after every submission, ensuring a clean slate for the next shot.
+
+**Update (Follow-up):** The user reported that the application state was not being correctly restored on refresh and that there was no way to load data from Azure.
+
+9.  **State Restoration and Azure Load:**
+    *   **Reasoning:** The application was not correctly restoring the session state on refresh, and there was no way to recover data from Azure.
+    *   **Change:** A new `restore_state` function was implemented to run on app start. It inspects the database for the most recent shot and correctly restores the session state.
+    *   **Change:** A "Load from Azure" section was added to the sidebar. This feature allows the user to select a set from a dropdown menu, download it from Azure, and load it into the local database.
