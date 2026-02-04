@@ -5,7 +5,7 @@ from azure.storage.blob import BlobServiceClient
 import datetime
 import io
 import os
-import base64
+import re
 import pandas as pd
 import google.generativeai as genai
 
@@ -17,7 +17,6 @@ def get_ai_suggestion(api_key, df_set):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('models/gemini-flash-latest')
-        # Sort by game, then frame, then shot to ensure chronological order for the AI
         df_set = df_set.sort_values(by=['game_number', 'id'])
         data_summary = df_set.to_string()
 
@@ -44,7 +43,6 @@ def get_ai_analysis(api_key, df_game):
     """
     Performs a post-game analysis and provides practice recommendations.
     """
-    # This function remains largely the same as it analyzes a single game.
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('models/gemini-flash-latest')
@@ -91,13 +89,12 @@ con.execute("""
         shot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 """)
-# Backwards compatibility for older DBs
 for col, col_type in {'set_id': 'VARCHAR', 'set_name': 'VARCHAR'}.items():
     try:
         con.execute(f"ALTER TABLE shots ADD COLUMN {col} {col_type};")
         con.commit()
     except duckdb.Error:
-        pass # Column already exists
+        pass
 
 # --- Scoring Logic ---
 def get_pins_from_str(pins_str):
@@ -136,22 +133,22 @@ def calculate_scores(df):
                     frame_score = 10 + raw_pins[shot_idx + 1] + raw_pins[shot_idx + 2]
                 else: break
                 shot_idx += 1
-            else: # Leave
+            else:
                 if shot_idx + 1 < len(shots) and shots[shot_idx+1]['frame_number'] == frame_num:
                     shot2 = shots[shot_idx+1]
                     if shot2['shot_result'] == 'Spare':
                         if shot_idx + 2 < len(raw_pins):
                             frame_score = 10 + raw_pins[shot_idx + 2]
                         else: break
-                    else: # Open
+                    else:
                         frame_score = raw_pins[shot_idx] + raw_pins[shot_idx+1]
                     shot_idx += 2
                 else: break
-        else: # Frame 10
+        else:
             frame_10_shots = [s for s in shots if s['frame_number'] == 10]
             frame_10_pins = [p for i, p in enumerate(raw_pins) if shots[i]['frame_number'] == 10]
             is_done = False
-            if frame_10_shots[0]['shot_result'] == 'Strike':
+            if frame_10_shots and frame_10_shots[0]['shot_result'] == 'Strike':
                 if len(frame_10_shots) == 3: is_done = True
             elif 'Spare' in [s['shot_result'] for s in frame_10_shots]:
                 if len(frame_10_shots) == 3: is_done = True
@@ -165,7 +162,6 @@ def calculate_scores(df):
         total_score += frame_score
         frame_scores[frame_idx] = total_score
 
-    # --- Max Possible Score (FIXED) ---
     max_score = 0
     if not df.empty:
         last_scored_frame_idx = -1
@@ -176,20 +172,15 @@ def calculate_scores(df):
         
         max_score = frame_scores[last_scored_frame_idx] if last_scored_frame_idx != -1 else 0
         
-        # Calculate potential for remaining frames
         start_frame_idx = last_scored_frame_idx + 1
         
-        # Handle potential of the first unscored frame
         if start_frame_idx < 10:
             shots_in_unscored_frame = [s for s in shots if s['frame_number'] == start_frame_idx + 1]
             if shots_in_unscored_frame and shots_in_unscored_frame[0]['shot_result'] == 'Leave':
-                # If first ball is a leave, max is a spare (10) + bonus from next frame's first ball (10)
                 max_score += 20 
             else:
-                # If it's a strike or an empty frame, potential is 30
                 max_score += 30
             
-            # Add 30 for all subsequent frames
             for i in range(start_frame_idx + 1, 10):
                 max_score += 30
 
@@ -225,10 +216,10 @@ def upload_set_to_azure(con, set_id):
 st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Set Tracker")
 
-# --- Session State Initialization ---
-if 'set_id' not in st.session_state:
+def initialize_new_set(new_set_name):
+    """Resets session state for a new set."""
     st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    st.session_state.set_name = f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
+    st.session_state.set_name = new_set_name
     st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     st.session_state.game_number = 1
     st.session_state.current_frame = 1
@@ -237,75 +228,108 @@ if 'set_id' not in st.session_state:
     st.session_state.starting_lane = "Left Lane"
     st.session_state.game_over = False
 
+if 'set_id' not in st.session_state:
+    initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+
 # --- Sidebar ---
 st.sidebar.header("Set Management")
 
-# --- Set Selection ---
 all_sets_from_db = con.execute("SELECT DISTINCT set_id, set_name FROM shots ORDER BY set_name DESC").fetchall()
 set_map = {s[0]: s[1] for s in all_sets_from_db}
-if st.session_state.set_id not in set_map:
+if st.session_state.set_id not in set_map and st.session_state.set_name:
     set_map[st.session_state.set_id] = st.session_state.set_name
 
-selected_set_name = st.sidebar.selectbox(
-    "Select Set to View/Analyze",
-    options=list(set_map.values()),
-    index=list(set_map.keys()).index(st.session_state.set_id)
-)
+if set_map:
+    try:
+        current_set_index = list(set_map.keys()).index(st.session_state.set_id)
+    except ValueError:
+        current_set_index = 0 # Default to the first item if current set_id is not in map
+    
+    selected_set_name = st.sidebar.selectbox(
+        "Select Set to View/Analyze",
+        options=list(set_map.values()),
+        index=current_set_index
+    )
+    selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_name][0]
 
-# Find the set_id corresponding to the selected_set_name
-selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_name][0]
-
-if selected_set_id != st.session_state.set_id:
-    st.session_state.set_id = selected_set_id
-    st.session_state.set_name = selected_set_name
-    latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC LIMIT 1", [selected_set_id]).fetchone()
-    if latest_game:
-        st.session_state.game_id = latest_game[0]
-        st.session_state.game_number = latest_game[1]
-        first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [latest_game[0]]).fetchone()
-        st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
-    else:
-        st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-        st.session_state.game_number = 1
-        st.session_state.starting_lane = "Left Lane"
-    st.rerun()
+    if selected_set_id != st.session_state.set_id:
+        st.session_state.set_id = selected_set_id
+        st.session_state.set_name = selected_set_name
+        latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC LIMIT 1", [selected_set_id]).fetchone()
+        if latest_game:
+            st.session_state.game_id, st.session_state.game_number = latest_game
+            first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [latest_game[0]]).fetchone()
+            st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
+        else: # If set exists but has no games
+            initialize_new_set(selected_set_name)
+        st.rerun()
 
 if st.sidebar.button("Start New Set"):
-    st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    st.session_state.set_name = f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
-    st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    st.session_state.game_number = 1
-    st.session_state.current_frame = 1
-    st.session_state.current_shot = 1
-    st.session_state.starting_lane = "Left Lane"
+    today_str = datetime.datetime.now().strftime('%m-%d-%y')
+    base_name = f"League {today_str}"
+    existing_sets_today = con.execute("SELECT set_name FROM shots WHERE set_name LIKE ? ORDER BY set_name DESC", [f"{base_name}%"]).fetchall()
+    
+    next_seq = 1
+    if existing_sets_today:
+        last_set_name = existing_sets_today[0][0]
+        match = re.search(r'_(\d+)$', last_set_name)
+        if match:
+            next_seq = int(match.group(1)) + 1
+        else: # First one was un-numbered
+            next_seq = 2
+
+    new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
+    initialize_new_set(new_set_name)
     st.rerun()
+
+new_name = st.sidebar.text_input("Rename Current Set", value=st.session_state.get('set_name', ''))
+if st.sidebar.button("Rename Set"):
+    if new_name:
+        con.execute("UPDATE shots SET set_name = ? WHERE set_id = ?", (new_name, st.session_state.set_id))
+        con.commit()
+        st.session_state.set_name = new_name
+        st.rerun()
 
 if st.sidebar.button("Save Set to Azure"):
     upload_set_to_azure(con, st.session_state.set_id)
 
-# --- Game Selection within the Set ---
+with st.sidebar.expander("⚠️ Danger Zone"):
+    if st.button("Delete Current Set"):
+        con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
+        con.commit()
+        st.success(f"Set '{st.session_state.set_name}' has been deleted.")
+        # Reset to a new, clean set
+        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+        st.rerun()
+
+
+# --- Game Selection & Data Fetching ---
 st.sidebar.header("Game Management")
-games_in_set = con.execute("SELECT DISTINCT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number", [st.session_state.set_id]).fetchall()
-game_map = {g[0]: f"Game {g[1]}" for g in games_in_set}
-if st.session_state.game_id not in game_map:
-     game_map[st.session_state.game_id] = f"Game {st.session_state.game_number}"
+df_set = con.execute("SELECT * FROM shots WHERE set_id = ?", [st.session_state.set_id]).fetchdf()
+
+games_in_set = df_set['game_number'].unique()
+games_in_set.sort()
+game_map = {f"Game {g}": g for g in games_in_set}
+if st.session_state.game_number not in game_map.values():
+    game_map[f"Game {st.session_state.game_number}"] = st.session_state.game_number
 
 selected_game_name = st.sidebar.selectbox(
     "Select Game",
-    options=list(game_map.values()),
-    index=list(game_map.keys()).index(st.session_state.game_id)
+    options=list(game_map.keys()),
+    index=list(game_map.values()).index(st.session_state.game_number)
 )
-selected_game_id = [gid for gid, name in game_map.items() if name == selected_game_name][0]
+selected_game_number = game_map[selected_game_name]
 
-if selected_game_id != st.session_state.game_id:
-    st.session_state.game_id = selected_game_id
-    st.session_state.game_number = int(game_map[selected_game_id].replace("Game ", ""))
-    first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [selected_game_id]).fetchone()
+if selected_game_number != st.session_state.game_number:
+    st.session_state.game_number = selected_game_number
+    game_id_res = df_set[df_set['game_number'] == selected_game_number]['game_id'].iloc[0]
+    st.session_state.game_id = game_id_res
+    first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id_res]).fetchone()
     st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
     st.rerun()
 
 if st.sidebar.button("Start New Game in Set"):
-    new_game_num = st.session_state.game_number + 1
+    new_game_num = (max(games_in_set) if games_in_set.size > 0 else 0) + 1
     st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     st.session_state.game_number = new_game_num
     st.session_state.current_frame = 1
@@ -314,10 +338,7 @@ if st.sidebar.button("Start New Game in Set"):
     st.session_state.starting_lane = "Left Lane"
     st.rerun()
 
-
-# --- Data Fetching ---
-df_set = con.execute("SELECT * FROM shots WHERE set_id = ?", [st.session_state.set_id]).fetchdf()
-df_current_game = df_set[df_set['game_id'] == st.session_state.game_id] if not df_set.empty else pd.DataFrame()
+df_current_game = df_set[df_set['game_number'] == st.session_state.game_number] if not df_set.empty else pd.DataFrame()
 
 # --- Scoring Display ---
 frame_scores, total_score, max_score = calculate_scores(df_current_game)
@@ -335,7 +356,6 @@ else:
     col1, col2 = st.columns(2)
     with col1:
         shot_result_options = []
-        shot_result_label = "Shot Result"
         if st.session_state.current_frame == 10:
             if st.session_state.current_shot == 1: shot_result_options = ["Strike", "Leave"]
             elif st.session_state.current_shot == 2:
@@ -345,14 +365,13 @@ else:
             else: shot_result_options = ["Strike", "Leave", "Open"]
         else:
             shot_result_options = ["Strike", "Leave"] if st.session_state.current_shot == 1 else ["Spare", "Open"]
-        shot_result = st.radio(shot_result_label, shot_result_options, key="shot_result", horizontal=True)
+        st.radio("Shot Result", shot_result_options, key="shot_result", horizontal=True)
     with col2:
         if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
             st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
             lane_number = st.session_state.starting_lane
         else:
-            # --- FIX: Guard against state loss by fetching from DB if needed ---
-            if 'starting_lane' not in st.session_state:
+            if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
                 first_shot = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
                 st.session_state.starting_lane = first_shot[0] if first_shot else "Left Lane"
             
@@ -364,13 +383,10 @@ else:
     
     if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
         st.subheader("Ball Trajectory")
-        col1a, col2a = st.columns(2)
-        with col1a:
-            arrows_pos = st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
-        with col2a:
-            breakpoint_pos = st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
+        st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
+        st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
 
-    ball_reaction = st.text_input("Ball Reaction (e.g., broke early, held line)", key="ball_reaction")
+    st.text_input("Ball Reaction", key="ball_reaction")
     st.subheader("Pins Left Standing")
     pins_selected = {pin: st.checkbox(str(pin), key=f"pin_{pin}") for pin in range(1, 11)}
 
@@ -394,7 +410,7 @@ else:
                 st.session_state.current_shot = 1
             else:
                 st.session_state.current_shot = 2
-        else: # Frame 10
+        else:
             shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
             shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
             if st.session_state.current_shot == 1:
@@ -408,7 +424,6 @@ else:
         st.rerun()
 
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
-
 
 # --- Analytical Dashboard ---
 st.header(f"📊 Data for Set: {st.session_state.set_name}")

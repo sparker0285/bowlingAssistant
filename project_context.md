@@ -93,3 +93,30 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The `st.session_state.starting_lane` variable was not being correctly persisted across all app reruns, causing a crash when it was accessed in later frames.
     *   **Change:** A guard clause was added to the lane selection logic. If `starting_lane` is missing from the session state, it is fetched from the database for the current game.
     *   **Change:** The state initialization logic was improved to ensure `starting_lane` is correctly set when starting a new set, starting a new game, or switching between existing games. This makes the app more resilient to state loss.
+
+---
+## Session from Monday, February 9, 2026
+
+**User Story:** The user requested several improvements to the set management functionality.
+1.  **Sequential Set Names:** The user wants to be able to create multiple sets on the same day with sequential names (e.g., "League 02-09-26_2").
+2.  **Editable Set Names:** The user wants to be able to rename sets.
+3.  **Data Display Bug Fix:** The user noticed that the data display was not resetting correctly when a new set was created.
+4.  **Delete Sets:** The user wants to be able to delete sets.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1.  **Sequential Set Names:**
+    *   **Reasoning:** The user wanted a better way to organize multiple sets on the same day.
+    *   **Change:** The "Start New Set" button now checks for existing sets on the same day and appends a sequential number to the set name.
+
+2.  **Editable Set Names:**
+    *   **Reasoning:** The user wanted to be able to rename sets.
+    *   **Change:** A text input field and a "Rename Set" button were added to the sidebar to allow the user to rename the current set.
+
+3.  **Data Display Bug Fix:**
+    *   **Reasoning:** The data display was not resetting correctly when a new set was created.
+    *   **Change:** The `initialize_new_set` function was updated to correctly reset the data display when a new set is created.
+
+4.  **Delete Sets:**
+    *   **Reasoning:** The user wanted to be able to delete sets.
+    *   **Change:** A "Delete Current Set" button was added to the "Danger Zone" expander in the sidebar to allow the user to delete the current set.
