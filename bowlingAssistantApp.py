@@ -111,10 +111,17 @@ def calculate_scores(df):
         if s['shot_result'] == 'Strike':
             raw_pins.append(10)
         elif s['shot_result'] == 'Spare':
-            shot1_pins_str = [sh['pins_knocked_down'] for sh in shots if sh['frame_number'] == s['frame_number'] and sh['shot_number'] == 1][0]
-            raw_pins.append(10 - len(get_pins_from_str(shot1_pins_str)))
-        else:
-            raw_pins.append(len(get_pins_from_str(s['pins_knocked_down'])))
+            # Find the first shot of the same frame to determine pins knocked down
+            shot1_df = df[(df['frame_number'] == s['frame_number']) & (df['shot_number'] == 1)]
+            if not shot1_df.empty:
+                shot1_pins_left_str = shot1_df['pins_left'].iloc[0]
+                raw_pins.append(len(get_pins_from_str(shot1_pins_left_str)))
+            else: # Should not happen in valid data
+                raw_pins.append(0) 
+        else: # Open frame
+            pins_knocked_down_list = get_pins_from_str(s['pins_knocked_down'])
+            raw_pins.append(len(pins_knocked_down_list))
+
 
     frame_scores = [None] * 10
     total_score = 0
@@ -404,40 +411,93 @@ else:
         st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
 
     st.text_input("Ball Reaction", key="ball_reaction")
+    
+    # --- Pin Selection UI (FIXED) ---
     st.subheader("Pins Left Standing")
-    pins_selected = {pin: st.checkbox(str(pin), key=f"pin_{pin}") for pin in range(1, 11)}
+    
+    is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
+    pins_available = st.session_state.get('pins_left_after_first_shot', [])
+    
+    if st.session_state.current_shot == 1:
+        st.write("Select the pins **left standing** after your first shot.")
+    else:
+        st.write("Select the pins **still standing** (for an Open frame).")
+
+    pins_selected = {}
+    cols = st.columns(10)
+    for i in range(1, 11):
+        disable_pin = False
+        if st.session_state.current_shot == 2:
+            # Disable pins that were already knocked down
+            if i not in pins_available:
+                disable_pin = True
+        # Always disable for spare or strike
+        if is_spare_or_strike:
+            disable_pin = True
+        
+        with cols[i-1]:
+            pins_selected[i] = st.checkbox(str(i), key=f"pin_{i}", disabled=disable_pin)
+
 
     def submit_shot():
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
         arrows = st.session_state.arrows_pos if use_trajectory else None
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
-        pins_left_standing = sorted([pin for pin, selected in pins_selected.items() if selected])
+        
+        shot_res = st.session_state.shot_result
+        pins_left_standing = sorted([pin for pin, selected in pins_selected.items() if st.session_state.get(f"pin_{pin}")])
+        pins_knocked_down_str = "N/A" # Default
+
+        if st.session_state.current_shot == 1:
+            if shot_res == "Strike":
+                st.session_state.pins_left_after_first_shot = []
+                pins_knocked_down_str = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+            else: # Leave
+                st.session_state.pins_left_after_first_shot = pins_left_standing
+                knocked_down = [p for p in range(1, 11) if p not in pins_left_standing]
+                pins_knocked_down_str = ", ".join(map(str, knocked_down))
+        else: # Shot 2 (or 3)
+            prev_pins_left = st.session_state.get('pins_left_after_first_shot', [])
+            if shot_res == "Spare":
+                pins_knocked_down_str = ", ".join(map(str, prev_pins_left))
+            else: # Open
+                knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
+                pins_knocked_down_str = ", ".join(map(str, knocked_down))
+
         pins_left_standing_str = ", ".join(map(str, pins_left_standing))
 
         con.execute(
             "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, st.session_state.shot_result, "N/A", pins_left_standing_str, st.session_state.lane_number, arrows, breakpoint, st.session_state.ball_reaction)
+            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, st.session_state.lane_number, arrows, breakpoint, st.session_state.ball_reaction)
         )
         con.commit()
         
-        shot_res = st.session_state.shot_result
+        # --- State Transition ---
         if st.session_state.current_frame < 10:
             if st.session_state.current_shot == 2 or shot_res == "Strike":
                 st.session_state.current_frame += 1
                 st.session_state.current_shot = 1
+                st.session_state.pins_left_after_first_shot = []
             else:
                 st.session_state.current_shot = 2
-        else:
+        else: # Frame 10 logic
             shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
             shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
             if st.session_state.current_shot == 1:
                 st.session_state.current_shot = 2
+                if shot_res == "Strike": st.session_state.pins_left_after_first_shot = []
             elif st.session_state.current_shot == 2:
                 if shot1_res == "Strike" or shot_res == "Spare":
                     st.session_state.current_shot = 3
+                    st.session_state.pins_left_after_first_shot = []
                 else: st.session_state.game_over = True
             else:
                 st.session_state.game_over = True
+        
+        # Clear UI state
+        for i in range(1, 11):
+            st.session_state[f'pin_{i}'] = False
+        st.session_state.ball_reaction = ""
 
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 

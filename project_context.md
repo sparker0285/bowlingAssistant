@@ -140,3 +140,11 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The application was not correctly handling authentication when only an `AZURE_STORAGE_CONNECTION_STRING` was provided, leading to an error.
     *   **Change:** The `upload_set_to_azure` function was updated to be more flexible. It now prioritizes authenticating with `AZURE_STORAGE_CONNECTION_STRING` if it exists in the secrets. If not, it falls back to using `AZURE_STORAGE_ACCOUNT_NAME` with `DefaultAzureCredential`.
     *   **Change:** The error message was improved to clearly state that either the connection string or the account name is required for the upload to function.
+
+**Update (Follow-up):** The user reported that the pin selection UI was not working correctly for the second shot of a frame.
+
+8.  **Pin Selection Logic Fix:**
+    *   **Reasoning:** The pin selection UI was not correctly disabling pins for the second shot of a frame, and the state of the pins was not being properly managed between shots.
+    *   **Change:** The `submit_shot` function was updated to correctly save the pins left after the first shot into the session state.
+    *   **Change:** The UI was updated to dynamically enable and disable the pin checkboxes based on the current shot and frame context. For example, if "Spare" is selected, all pins are disabled. For an "Open" frame, only the pins left standing from the first shot are enabled.
+    *   **Change:** The `submit_shot` function was also updated to clear the pin checkboxes after every submission, ensuring a clean slate for the next shot.
