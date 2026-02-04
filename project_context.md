@@ -120,3 +120,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 4.  **Delete Sets:**
     *   **Reasoning:** The user wanted to be able to delete sets.
     *   **Change:** A "Delete Current Set" button was added to the "Danger Zone" expander in the sidebar to allow the user to delete the current set.
+
+**Update (Follow-up):** The user reported an error when trying to save a set to Azure.
+
+5.  **Azure Credentials Fix:**
+    *   **Reasoning:** The application was trying to access Azure credentials from environment variables (`os.environ`) instead of using Streamlit's recommended secrets management (`st.secrets`).
+    *   **Change:** The `upload_set_to_azure` function was updated to fetch the `AZURE_STORAGE_ACCOUNT_NAME` and `AZURE_STORAGE_CONTAINER_NAME` from `st.secrets`.
+    *   **Change:** Clear error handling was added to guide the user on how to configure their secrets if they are not found.

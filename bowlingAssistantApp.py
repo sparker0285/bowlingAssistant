@@ -189,10 +189,20 @@ def calculate_scores(df):
 
 # --- Azure Integration ---
 def upload_set_to_azure(con, set_id):
-    """Uploads all games in a set to Azure Blob Storage."""
+    """Uploads all games in a set to Azure Blob Storage using credentials from st.secrets."""
     try:
-        blob_service_client = BlobServiceClient(account_url=f"https://{os.environ['AZURE_STORAGE_ACCOUNT_NAME']}.blob.core.windows.net", credential=DefaultAzureCredential())
-        container_name = os.environ["AZURE_STORAGE_CONTAINER_NAME"]
+        # Check for secrets
+        if "AZURE_STORAGE_ACCOUNT_NAME" not in st.secrets or "AZURE_STORAGE_CONTAINER_NAME" not in st.secrets:
+            st.error("Azure credentials not found. Please add AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_CONTAINER_NAME to your Streamlit secrets.")
+            return
+
+        account_name = st.secrets["AZURE_STORAGE_ACCOUNT_NAME"]
+        container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
+        
+        blob_service_client = BlobServiceClient(
+            account_url=f"https://{account_name}.blob.core.windows.net",
+            credential=DefaultAzureCredential()
+        )
 
         df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id]).fetchdf()
         if df.empty:
@@ -208,8 +218,9 @@ def upload_set_to_azure(con, set_id):
         blob_client.upload_blob(csv_buffer.getvalue(), overwrite=True)
         
         st.success(f"Set '{set_name}' saved successfully to Azure.")
+
     except Exception as e:
-        st.error(f"Failed to upload to Azure: {e}")
+        st.error(f"An unexpected error occurred while uploading to Azure: {e}")
 
 
 # --- Main Application ---
