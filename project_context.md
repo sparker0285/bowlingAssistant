@@ -133,3 +133,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 6.  **Removed Redundant `st.rerun()`:**
     *   **Reasoning:** The `submit_shot` function, used as a button callback, contained an unnecessary `st.rerun()` call. Streamlit automatically reruns the script after a callback, making the explicit call redundant and causing a warning.
     *   **Change:** The `st.rerun()` line was removed from the end of the `submit_shot` function to eliminate the warning and align with Streamlit's best practices.
+
+**Update (Follow-up):** The user reported an Azure authentication error when `AZURE_STORAGE_ACCOUNT_NAME` was not present in the secrets.
+
+7.  **Flexible Azure Authentication:**
+    *   **Reasoning:** The application was not correctly handling authentication when only an `AZURE_STORAGE_CONNECTION_STRING` was provided, leading to an error.
+    *   **Change:** The `upload_set_to_azure` function was updated to be more flexible. It now prioritizes authenticating with `AZURE_STORAGE_CONNECTION_STRING` if it exists in the secrets. If not, it falls back to using `AZURE_STORAGE_ACCOUNT_NAME` with `DefaultAzureCredential`.
+    *   **Change:** The error message was improved to clearly state that either the connection string or the account name is required for the upload to function.

@@ -191,17 +191,25 @@ def calculate_scores(df):
 def upload_set_to_azure(con, set_id):
     """Uploads all games in a set to Azure Blob Storage using credentials from st.secrets."""
     try:
-        if "AZURE_STORAGE_ACCOUNT_NAME" not in st.secrets or "AZURE_STORAGE_CONTAINER_NAME" not in st.secrets:
-            st.error("Azure credentials not found. Please add AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_CONTAINER_NAME to your Streamlit secrets.")
+        container_name = st.secrets.get("AZURE_STORAGE_CONTAINER_NAME")
+        connection_string = st.secrets.get("AZURE_STORAGE_CONNECTION_STRING")
+        account_name = st.secrets.get("AZURE_STORAGE_ACCOUNT_NAME")
+
+        if not container_name:
+            st.error("Azure secret `AZURE_STORAGE_CONTAINER_NAME` not found. Please add it to your Streamlit secrets.")
             return
 
-        account_name = st.secrets["AZURE_STORAGE_ACCOUNT_NAME"]
-        container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
-        
-        blob_service_client = BlobServiceClient(
-            account_url=f"https://{account_name}.blob.core.windows.net",
-            credential=DefaultAzureCredential()
-        )
+        blob_service_client = None
+        if connection_string:
+            blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        elif account_name:
+            blob_service_client = BlobServiceClient(
+                account_url=f"https://{account_name}.blob.core.windows.net",
+                credential=DefaultAzureCredential()
+            )
+        else:
+            st.error("Azure credentials not found. Please add either `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME` to your Streamlit secrets.")
+            return
 
         df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id]).fetchdf()
         if df.empty:
