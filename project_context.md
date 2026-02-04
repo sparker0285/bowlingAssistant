@@ -60,3 +60,29 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The `get_ai_suggestion` function was updated to analyze all games from the current day, not just the current game.
     *   **Change:** A new function, `get_ai_analysis`, was added to provide post-game analysis and practice recommendations.
     *   **Change:** The AI Assistant section was updated to show a "Get AI Suggestion" button for the active game and a "Get AI Post-Game Analysis" button for past games.
+
+---
+## Session from Friday, February 6, 2026
+
+**User Story:** The user requested a new way to organize games into "sets" and a fix for a bug in the max score calculation.
+1.  **Max Score Bug:** The user noticed that the max score calculation was incorrect.
+2.  **Game Sets:** The user wants to group games into sets, with a default name of "League <date>".
+3.  **UI Changes:** The user wants to be able to start a new set, save a set to Azure, and select a game within a set.
+4.  **Data Display & AI:** The user wants the data table to show all games in the selected set, sorted with the most recent frames first, and for the AI Assistant to use the entire set for its advice.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1.  **Max Score Bug Fix:**
+    *   **Reasoning:** The previous logic for calculating the max score was not accounting for all scenarios.
+    *   **Change:** The `calculate_scores` function was updated to correctly calculate the maximum possible score.
+
+2.  **Game Sets Implementation:**
+    *   **Reasoning:** The user wanted a better way to organize games.
+    *   **Change:** The database schema was updated to include a `set_id` and `set_name` for grouping games.
+    *   **Change:** The UI was updated to manage these sets, including adding "Start New Set" and "Save Set to Azure" buttons.
+    *   **Change:** The main dropdown is now for selecting a game set, and a second dropdown allows the user to select a specific game within that set.
+
+3.  **Updated Data Display & AI:**
+    *   **Reasoning:** The user wanted the data display and AI to be more relevant to the selected set.
+    *   **Change:** The data table now shows all games within the selected set, sorted with the most recent frames first.
+    *   **Change:** The AI Assistant now uses the entire set of games for its real-time advice.
