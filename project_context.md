@@ -32,3 +32,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 2.  **Lane Switching Logic:**
     *   **Reasoning:** The user reported that the lane was not alternating correctly on the second frame. While the original logic appeared correct upon review, a refactor was performed to improve clarity and hopefully resolve any subtle, unspotted bug.
     *   **Change:** The `if/else` block for determining the `lane_number` was rewritten. The new logic is more explicit: it determines if the frame is odd, checks the starting lane, and then assigns the current lane based on those two variables. The core logic remains the same (odd frames on the starting lane, even frames on the other), but the implementation is cleaner and less prone to subtle errors.
+
+**Update (Follow-up):** The user reported that the automatic save was not working correctly.
+
+3.  **Reliable Auto-Save:**
+    *   **Reasoning:** The automatic save feature was not reliably writing data to the disk. It appeared data was only being flushed to the database file when another database action (like the one in "Save to Azure") occurred.
+    *   **Change:** To fix this, an explicit `con.commit()` was added to the `submit_shot` function immediately after the `INSERT` statement. This forces the database to write the new shot data to the `bowling.db` file, guaranteeing that every shot is saved instantly and durably.
+    *   **Change:** A `con.commit()` was also added to the "Start New Game" button logic to ensure the `DELETE` command is persisted immediately, clearing the database for the new game.

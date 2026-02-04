@@ -306,12 +306,17 @@ else:
     st.sidebar.success("🎉 Game Over! 🎉")
 
 if st.sidebar.button("Start New Game"):
-    st.session_state.game_number += 1
+    # Clear session state and database for a new game
+    st.session_state.game_number = st.session_state.get('game_number', 1) + 1
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
     st.session_state.pins_left_after_first_shot = []
     st.session_state.game_over = False
     con.execute("DELETE FROM shots")
+    con.commit() # Ensure the deletion is saved to the file
+    
+    # Reset any other necessary state
+    st.session_state.state_restored = False 
     st.rerun()
 
 if st.sidebar.button("Save Game to Azure"):
@@ -478,6 +483,7 @@ def submit_shot():
         "INSERT INTO shots (game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, st.session_state.lane_number, arrows, breakpoint, ball_reaction_str)
     )
+    con.commit() # Force a commit to the database file to ensure data is saved.
     st.success(f"Frame {st.session_state.current_frame}, Shot {st.session_state.current_shot} submitted!")
 
     # --- State Transition Logic ---
