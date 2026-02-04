@@ -155,3 +155,10 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The application was not correctly restoring the session state on refresh, and there was no way to recover data from Azure.
     *   **Change:** A new `restore_state` function was implemented to run on app start. It inspects the database for the most recent shot and correctly restores the session state.
     *   **Change:** A "Load from Azure" section was added to the sidebar. This feature allows the user to select a set from a dropdown menu, download it from Azure, and load it into the local database.
+
+**Update (Follow-up):** The user reported a `TypeError` on startup due to corrupted data in the local database.
+
+10. **Robust State Management:**
+    *   **Reasoning:** The previous state management logic was too complex and could lead to data corruption.
+    *   **Change:** The logic for advancing the frame and shot was moved back into the `submit_shot` function, making the state updates more direct and reliable.
+    *   **Change:** The `restore_state` function was simplified to only run on initial app load, and a safeguard was added to handle corrupted data by starting a new set.

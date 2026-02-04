@@ -258,20 +258,17 @@ def download_and_load_set(blob_name):
             st.error("Downloaded file is not a valid set file.")
             return
 
-        # Delete existing data for this set_id to prevent duplicates
         set_id_to_load = df['set_id'].iloc[0]
         con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
         
-        # Use DuckDB's efficient DataFrame insertion
         con.register('df_to_insert', df)
         con.execute('INSERT INTO shots SELECT * FROM df_to_insert')
         con.unregister('df_to_insert')
         con.commit()
 
         st.success(f"Successfully loaded set '{df['set_name'].iloc[0]}'.")
-        # Set the loaded set as the current one
         st.session_state.set_id = set_id_to_load
-        st.session_state.set_name = df['set_name'].iloc[0]
+        st.session_state.state_restored = False # Force a restore on rerun
         st.rerun()
 
     except Exception as e:
@@ -281,66 +278,6 @@ def download_and_load_set(blob_name):
 # --- Main Application ---
 st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Set Tracker")
-
-def restore_state():
-    """Restores the full application state from the database."""
-    if 'state_restored' in st.session_state:
-        return
-
-    latest_shot = con.execute("SELECT * FROM shots ORDER BY id DESC LIMIT 1").fetchone()
-    if not latest_shot:
-        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
-        st.session_state.state_restored = True
-        return
-
-    # Unpack latest shot data
-    (id, set_id, set_name, game_id, game_number, frame, shot, 
-     shot_result, pins_knocked, pins_left_str, lane, *_) = latest_shot
-
-    st.session_state.set_id = set_id
-    st.session_state.set_name = set_name
-    st.session_state.game_id = game_id
-    st.session_state.game_number = game_number
-
-    # Determine next shot based on last one
-    next_frame, next_shot = frame, shot
-    pins_left = get_pins_from_str(pins_left_str)
-    game_over = False
-
-    if frame < 10:
-        if shot == 2 or shot_result == "Strike":
-            next_frame += 1
-            next_shot = 1
-            pins_left = []
-        else:
-            next_shot = 2
-    else: # Frame 10
-        shots_in_frame10 = con.execute("SELECT shot_number, shot_result FROM shots WHERE game_id = ? AND frame_number = 10", [game_id]).fetchall()
-        shot1_res = shots_in_frame10[0][1] if len(shots_in_frame10) > 0 else ''
-        shot2_res = shots_in_frame10[1][1] if len(shots_in_frame10) > 1 else ''
-
-        if shot == 1:
-            next_shot = 2
-            if shot_result == "Strike": pins_left = []
-        elif shot == 2:
-            if shot1_res == "Strike" or shot_result == "Spare":
-                next_shot = 3
-                pins_left = []
-            else: game_over = True
-        else: # shot == 3
-            game_over = True
-
-    st.session_state.current_frame = next_frame
-    st.session_state.current_shot = next_shot
-    st.session_state.pins_left_after_first_shot = pins_left
-    st.session_state.game_over = game_over
-    
-    first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id]).fetchone()
-    st.session_state.starting_lane = first_shot_of_game[0] if first_shot_of_game else "Left Lane"
-    
-    st.session_state.state_restored = True
-    st.info(f"Restored session to Set '{set_name}', Game {game_number}.")
-
 
 def initialize_new_set(new_set_name):
     """Resets session state for a new set."""
@@ -355,6 +292,65 @@ def initialize_new_set(new_set_name):
     st.session_state.game_over = False
     st.session_state.state_restored = True
 
+def restore_state():
+    """Restores the full application state from the database on initial load."""
+    if st.session_state.get('state_restored', False):
+        return
+
+    latest_shot = con.execute("SELECT * FROM shots ORDER BY id DESC LIMIT 1").fetchone()
+    if not latest_shot:
+        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+        return
+
+    (id, set_id, set_name, game_id, game_number, frame, shot, 
+     shot_result, _, pins_left_str, _, *__) = latest_shot
+
+    if frame is None or shot is None:
+        st.warning("Could not restore session from database due to invalid data. Starting a new set.")
+        initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
+        return
+    
+    st.session_state.set_id = set_id
+    st.session_state.set_name = set_name
+    st.session_state.game_id = game_id
+    st.session_state.game_number = game_number
+
+    next_frame, next_shot = frame, shot
+    pins_left = get_pins_from_str(pins_left_str)
+    game_over = False
+
+    if frame < 10:
+        if shot == 2 or shot_result == "Strike":
+            next_frame += 1
+            next_shot = 1
+            pins_left = []
+        else:
+            next_shot = 2
+    else:
+        shots_in_frame10 = con.execute("SELECT shot_number, shot_result FROM shots WHERE game_id = ? AND frame_number = 10", [game_id]).fetchall()
+        shot1_res = shots_in_frame10[0][1] if len(shots_in_frame10) > 0 else ''
+        
+        if shot == 1:
+            next_shot = 2
+            if shot_result == "Strike": pins_left = []
+        elif shot == 2:
+            if shot1_res == "Strike" or shot_result == "Spare":
+                next_shot = 3
+                pins_left = []
+            else: game_over = True
+        else:
+            game_over = True
+
+    st.session_state.current_frame = next_frame
+    st.session_state.current_shot = next_shot
+    st.session_state.pins_left_after_first_shot = pins_left
+    st.session_state.game_over = game_over
+    
+    first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id]).fetchone()
+    st.session_state.starting_lane = first_shot_of_game[0] if first_shot_of_game else "Left Lane"
+    
+    st.session_state.state_restored = True
+    st.info(f"Restored session to Set '{set_name}', Game {game_number}.")
 
 restore_state()
 
@@ -363,7 +359,7 @@ st.sidebar.header("Set Management")
 
 all_sets_from_db = con.execute("SELECT DISTINCT set_id, set_name FROM shots ORDER BY set_name DESC").fetchall()
 set_map = {s[0]: s[1] for s in all_sets_from_db}
-if st.session_state.set_id not in set_map and st.session_state.set_name:
+if st.session_state.set_id not in set_map and st.session_state.get('set_name'):
     set_map[st.session_state.set_id] = st.session_state.set_name
 
 if set_map:
@@ -377,7 +373,7 @@ if set_map:
 
     if selected_set_id != st.session_state.set_id:
         st.session_state.set_id = selected_set_id
-        st.session_state.state_restored = False # Force restore for the selected set
+        st.session_state.state_restored = False
         st.rerun()
 
 if st.sidebar.button("Start New Set"):
@@ -405,7 +401,7 @@ if st.sidebar.button("Rename Set"):
         st.rerun()
 
 with st.sidebar.expander("☁️ Azure Cloud Storage"):
-    if st.button("Save Set to Azure"):
+    if st.button("Save Current Set to Azure"):
         upload_set_to_azure(con, st.session_state.set_id)
     
     azure_client = get_azure_client()
@@ -423,7 +419,6 @@ with st.sidebar.expander("☁️ Azure Cloud Storage"):
         except Exception as e:
             st.error(f"Could not list Azure blobs: {e}")
 
-
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
@@ -431,7 +426,6 @@ with st.sidebar.expander("⚠️ Danger Zone"):
         st.success(f"Set '{st.session_state.set_name}' has been deleted.")
         initialize_new_set(f"League {datetime.datetime.now().strftime('%m-%d-%y')}")
         st.rerun()
-
 
 # --- Game Selection & Data Fetching ---
 st.sidebar.header("Game Management")
@@ -448,7 +442,7 @@ selected_game_number = game_map[selected_game_name]
 
 if selected_game_number != st.session_state.game_number:
     st.session_state.game_number = selected_game_number
-    st.session_state.state_restored = False # Force restore for selected game
+    st.session_state.state_restored = False
     st.rerun()
 
 if st.sidebar.button("Start New Game in Set"):
@@ -551,7 +545,30 @@ else:
         )
         con.commit()
         
-        st.session_state.state_restored = False
+        if st.session_state.current_frame < 10:
+            if st.session_state.current_shot == 2 or shot_res == "Strike":
+                st.session_state.current_frame += 1
+                st.session_state.current_shot = 1
+                st.session_state.pins_left_after_first_shot = []
+            else:
+                st.session_state.current_shot = 2
+        else:
+            shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
+            shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
+            if st.session_state.current_shot == 1:
+                st.session_state.current_shot = 2
+                if shot_res == "Strike": st.session_state.pins_left_after_first_shot = []
+            elif st.session_state.current_shot == 2:
+                if shot1_res == "Strike" or shot_res == "Spare":
+                    st.session_state.current_shot = 3
+                    st.session_state.pins_left_after_first_shot = []
+                else: st.session_state.game_over = True
+            else:
+                st.session_state.game_over = True
+        
+        for i in range(1, 11):
+            st.session_state[f'pin_{i}'] = False
+        st.session_state.ball_reaction = ""
         
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 
