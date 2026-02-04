@@ -54,10 +54,12 @@ def get_ai_suggestion(api_key, df_shots):
 def get_db_connection():
     """Initializes and returns a DuckDB database connection."""
     if 'db_connection' not in st.session_state:
-        st.session_state.db_connection = duckdb.connect(database=':memory:', read_only=False)
-        st.session_state.db_connection.execute("CREATE SEQUENCE seq_shots_id START 1;")
+        # Connect to a file-based database
+        st.session_state.db_connection = duckdb.connect(database='bowling.db', read_only=False)
+        # Use IF NOT EXISTS to prevent errors on re-run
+        st.session_state.db_connection.execute("CREATE SEQUENCE IF NOT EXISTS seq_shots_id START 1;")
         st.session_state.db_connection.execute("""
-            CREATE TABLE shots (
+            CREATE TABLE IF NOT EXISTS shots (
                 id INTEGER PRIMARY KEY DEFAULT nextval('seq_shots_id'),
                 game_number INTEGER,
                 frame_number INTEGER,
@@ -72,6 +74,67 @@ def get_db_connection():
             );
         """)
     return st.session_state.db_connection
+
+def restore_game_state(con):
+    """Restores the game state from the database if it exists."""
+    if 'state_restored' in st.session_state:
+        return
+
+    try:
+        last_shot = con.execute("SELECT * FROM shots ORDER BY id DESC LIMIT 1").fetchone()
+        if last_shot:
+            # Column names: id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, arrows_pos, breakpoint_pos, ball_reaction
+            last_game_number = last_shot[1]
+            last_frame_number = last_shot[2]
+            last_shot_number = last_shot[3]
+            last_shot_result = last_shot[4]
+            pins_left_str = last_shot[6]
+
+            # Logic to determine the next state
+            next_frame = last_frame_number
+            next_shot = last_shot_number
+            pins_left = get_pins_from_str(pins_left_str)
+
+            if last_frame_number < 10:
+                if last_shot_number == 2 or last_shot_result == "Strike":
+                    next_frame += 1
+                    next_shot = 1
+                    pins_left = []
+                else: # Shot 1 of a frame that was not a strike
+                    next_shot = 2
+            else: # Frame 10
+                if last_shot_number == 1:
+                    next_shot = 2
+                    if last_shot_result == "Strike":
+                        pins_left = []
+                elif last_shot_number == 2:
+                    frame10_shot1 = con.execute("SELECT shot_result FROM shots WHERE frame_number = 10 and shot_number = 1").fetchone()[0]
+                    if frame10_shot1 == "Strike" or last_shot_result == "Spare":
+                        next_shot = 3
+                        pins_left = []
+                    else: # Game is over
+                        st.session_state.game_over = True
+                elif last_shot_number == 3:
+                     st.session_state.game_over = True
+
+
+            st.session_state.game_number = last_game_number
+            st.session_state.current_frame = next_frame
+            st.session_state.current_shot = next_shot
+            st.session_state.pins_left_after_first_shot = pins_left
+            
+            # Restore starting lane
+            first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_number = ? and frame_number = 1 and shot_number = 1", [last_game_number]).fetchone()
+            if first_shot_of_game:
+                st.session_state.starting_lane = first_shot_of_game[0]
+            
+            st.info(f"Resumed game {last_game_number} at frame {next_frame}.")
+
+    except Exception as e:
+        st.warning(f"Could not restore game state: {e}")
+    
+    st.session_state.state_restored = True
+
 
 # --- Scoring Logic ---
 def get_pins_from_str(pins_str):
@@ -230,6 +293,7 @@ if 'game_over' not in st.session_state:
 
 # Get DB connection
 con = get_db_connection()
+restore_game_state(con)
 
 # --- Game Management & Scoring ---
 st.sidebar.header("Game Management")
@@ -306,10 +370,16 @@ with col2:
             st.metric("Current Lane", lane_number)
     else:
         # Determine lane based on starting lane and frame number
-        if st.session_state.starting_lane == "Left Lane":
-            lane_number = "Left Lane" if st.session_state.current_frame % 2 != 0 else "Right Lane"
-        else: # Started on Right Lane
-            lane_number = "Right Lane" if st.session_state.current_frame % 2 != 0 else "Left Lane"
+        is_odd_frame = st.session_state.current_frame % 2 != 0
+        starts_on_left = st.session_state.starting_lane == "Left Lane"
+
+        # If you start on left, you are on the left lane for odd frames (1, 3, 5...).
+        # If you start on right, you are on the right lane for odd frames.
+        # Otherwise, you are on the opposite lane.
+        if is_odd_frame:
+            lane_number = st.session_state.starting_lane
+        else:
+            lane_number = "Right Lane" if starts_on_left else "Left Lane"
         st.metric("Current Lane", lane_number)
 
     st.session_state.lane_number = lane_number
