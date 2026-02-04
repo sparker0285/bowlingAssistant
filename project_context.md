@@ -39,3 +39,24 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The automatic save feature was not reliably writing data to the disk. It appeared data was only being flushed to the database file when another database action (like the one in "Save to Azure") occurred.
     *   **Change:** To fix this, an explicit `con.commit()` was added to the `submit_shot` function immediately after the `INSERT` statement. This forces the database to write the new shot data to the `bowling.db` file, guaranteeing that every shot is saved instantly and durably.
     *   **Change:** A `con.commit()` was also added to the "Start New Game" button logic to ensure the `DELETE` command is persisted immediately, clearing the database for the new game.
+
+---
+## Session from Thursday, February 5, 2026
+
+**User Story:** The user requested the ability to save and analyze multiple games.
+1.  **Data Persistence:** The user wants to save all games for later analysis, not just the current game.
+2.  **AI Analysis:** The user wants to be able to get AI-powered advice on their games, both in real-time and after the game is over.
+3.  **Multi-Game Analysis:** The user wants the AI to consider all games from the current session when giving advice.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1.  **Game Persistence:**
+    *   **Reasoning:** The previous implementation deleted all data when a new game was started. This was changed to support saving multiple games.
+    *   **Change:** The "Start New Game" button now creates a new game with a unique `game_id` and increments the `game_number` without deleting the old data.
+    *   **Change:** A new dropdown menu was added to the sidebar to allow the user to load and view previous games.
+
+2.  **AI-Powered Analysis:**
+    *   **Reasoning:** The user wanted to be able to get AI-powered advice on their games.
+    *   **Change:** The `get_ai_suggestion` function was updated to analyze all games from the current day, not just the current game.
+    *   **Change:** A new function, `get_ai_analysis`, was added to provide post-game analysis and practice recommendations.
+    *   **Change:** The AI Assistant section was updated to show a "Get AI Suggestion" button for the active game and a "Get AI Post-Game Analysis" button for past games.
