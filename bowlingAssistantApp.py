@@ -10,13 +10,13 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- AI Logic ---
-def get_ai_suggestion(api_key, df_set, balls_in_bag):
+def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
     """
     Analyzes game data from a set and provides a suggestion for the next shot.
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('models/gemini-flash-latest')
+        model = genai.GenerativeModel(model_name)
         df_set = df_set.sort_values(by=['game_number', 'id'])
         data_summary = df_set.to_string()
         in_bag_summary = ", ".join(balls_in_bag)
@@ -43,13 +43,13 @@ def get_ai_suggestion(api_key, df_set, balls_in_bag):
     except Exception as e:
         return f"An error occurred while getting a suggestion: {e}"
 
-def get_ai_analysis(api_key, df_game):
+def get_ai_analysis(api_key, df_game, model_name):
     """
     Performs a post-game analysis and provides practice recommendations.
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('models/gemini-flash-latest')
+        model = genai.GenerativeModel(model_name)
         data_summary = df_game.to_string()
 
         prompt = f"""
@@ -473,6 +473,14 @@ with st.sidebar.expander("☁️ Azure Cloud Storage"):
         except Exception as e:
             st.error(f"Could not list Azure blobs: {e}")
 
+with st.sidebar.expander("🤖 AI Settings"):
+    model_options = {
+        "Gemini 2.5 Flash (Recommended)": "gemini-2.5-flash",
+        "Gemini 1.5 Flash (Economical)": "gemini-1.5-flash"
+    }
+    selected_model_label = st.selectbox("Select AI Model", options=list(model_options.keys()))
+    selected_model_id = model_options[selected_model_label]
+
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
@@ -671,12 +679,12 @@ else:
         if st.button("Get AI Suggestion for Next Shot"):
             if not df_set.empty:
                 with st.spinner("🤖 Calling the coach for advice..."):
-                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []))
+                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []), selected_model_id)
                     st.markdown(suggestion)
             else:
                 st.info("Submit some shots first.")
     if not df_current_game.empty:
         if st.button("Get AI Post-Game Analysis"):
             with st.spinner("🤖 Analyzing your game..."):
-                analysis = get_ai_analysis(api_key, df_current_game)
+                analysis = get_ai_analysis(api_key, df_current_game, selected_model_id)
                 st.markdown(analysis)
