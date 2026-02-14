@@ -98,83 +98,50 @@ def get_pins_from_str(pins_str):
 def calculate_scores(df):
     if df.empty:
         return [None] * 10, 0, 300
-
+    
     shots = df.sort_values(by='id').to_dict('records')
     frame_scores = [None] * 10
-    total_score = 0
-    shot_cursor = 0
+    
+    for i in range(len(shots)):
+        current_shot = shots[i]
+        frame = current_shot['frame_number']
+        
+        if frame > 10: continue
 
-    for frame in range(1, 11):
-        frame_shots = [s for s in shots if s.get('frame_number') == frame]
-        if not frame_shots:
-            break
-
-        shot1 = frame_shots[0]
-        shot1_pins_left = get_pins_from_str(shot1.get('pins_left', ''))
-        shot1_pins_knocked = 10 - len(shot1_pins_left)
-
-        frame_score = 0
+        score = 0
         is_frame_complete = False
 
-        if frame < 10:
-            if shot1.get('shot_result') == 'Strike':
-                future_shots = [s for s in shots if s['id'] > shot1['id']]
-                if len(future_shots) >= 2:
-                    bonus1_pins_left = get_pins_from_str(future_shots[0].get('pins_left', ''))
-                    bonus1 = 10 - len(bonus1_pins_left)
-                    
-                    if future_shots[0].get('shot_result') == 'Strike':
-                        bonus2 = 10 - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
-                    else:
-                        bonus2 = len(bonus1_pins_left) - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
-                    frame_score = 10 + bonus1 + bonus2
-                    is_frame_complete = True
-            else: # Not a strike
-                if len(frame_shots) > 1:
-                    shot2 = frame_shots[1]
-                    if shot2.get('shot_result') == 'Spare':
-                        future_shots = [s for s in shots if s['id'] > shot2['id']]
-                        if len(future_shots) >= 1:
-                            bonus = 10 - len(get_pins_from_str(future_shots[0].get('pins_left', '')))
-                            frame_score = 10 + bonus
-                            is_frame_complete = True
-                    else: # Open frame
-                        shot2_pins_left = get_pins_from_str(shot2.get('pins_left', ''))
-                        shot2_pins_knocked = len(shot1_pins_left) - len(shot2_pins_left)
-                        frame_score = shot1_pins_knocked + shot2_pins_knocked
-                        is_frame_complete = True
-        else: # 10th Frame
-            frame_score = shot1_pins_knocked
-            if len(frame_shots) > 1:
-                shot2 = frame_shots[1]
-                shot2_pins_left = get_pins_from_str(shot2.get('pins_left', ''))
-                if shot1.get('shot_result') == 'Strike':
-                    frame_score += 10 - len(shot2_pins_left)
+        if current_shot['shot_result'] == 'Strike':
+            if i + 2 < len(shots):
+                next1_pins = 10 - len(get_pins_from_str(shots[i+1].get('pins_left', '')))
+                if shots[i+1]['shot_result'] == 'Strike':
+                    next2_pins = 10 - len(get_pins_from_str(shots[i+2].get('pins_left', '')))
                 else:
-                    frame_score += len(shot1_pins_left) - len(shot2_pins_left)
-            
-            if len(frame_shots) > 2:
-                shot3 = frame_shots[2]
-                shot3_pins_left = get_pins_from_str(shot3.get('pins_left', ''))
-                if shot_is_fill_ball(frame_shots):
-                    frame_score += 10 - len(shot3_pins_left)
-                else:
-                    frame_score += len(get_pins_from_str(frame_shots[1].get('pins_left',''))) - len(shot3_pins_left)
-
-
-            if len(frame_shots) == 3 or (shot1.get('shot_result') != 'Strike' and len(frame_shots) == 2 and (len(frame_shots) < 2 or frame_shots[1].get('shot_result') != 'Spare')):
-                 is_frame_complete = True
-
+                    next2_pins = len(get_pins_from_str(shots[i+1].get('pins_left', ''))) - len(get_pins_from_str(shots[i+2].get('pins_left', '')))
+                score = 10 + next1_pins + next2_pins
+                is_frame_complete = True
+        elif current_shot['shot_result'] == 'Spare':
+            if i + 1 < len(shots):
+                next_pins = 10 - len(get_pins_from_str(shots[i+1].get('pins_left', '')))
+                score = 10 + next_pins
+                is_frame_complete = True
+        else: # Open frame
+            shot1_in_frame = next((s for s in shots if s['frame_number'] == frame and s['shot_number'] == 1), None)
+            if shot1_in_frame and current_shot['shot_number'] == 2:
+                shot1_pins_knocked = 10 - len(get_pins_from_str(shot1_in_frame.get('pins_left', '')))
+                shot2_pins_knocked = len(get_pins_from_str(shot1_in_frame.get('pins_left', ''))) - len(get_pins_from_str(current_shot.get('pins_left', '')))
+                score = shot1_pins_knocked + shot2_pins_knocked
+                is_frame_complete = True
 
         if is_frame_complete:
-            total_score += frame_score
-            frame_scores[frame - 1] = total_score
-            
-    return frame_scores, total_score, 300
+            prev_frame_score = frame_scores[frame - 2] if frame > 1 else 0
+            frame_scores[frame - 1] = (prev_frame_score or 0) + score
 
-def shot_is_fill_ball(frame10_shots):
-    if len(frame10_shots) < 3: return False
-    return frame10_shots[0].get('shot_result') == 'Strike' or frame10_shots[1].get('shot_result') == 'Spare'
+    total_score = 0
+    if frame_scores and [s for s in frame_scores if s is not None]:
+      total_score = max(s for s in frame_scores if s is not None)
+
+    return frame_scores, total_score, 300
 
 # --- Main App ---
 st.set_page_config(layout="wide")
