@@ -255,8 +255,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The `calculate_scores` function was still the likely cause of a silent startup crash.
     *   **Change:** The function was completely rewritten again to be simpler, more accurate, and more resilient. It now uses a more direct, frame-by-frame calculation that is easier to read and maintain. This resolves the startup crash and improves the accuracy of the score sheet.
 
-**Update (Follow-up):** The user reported a silent crash on startup, likely due to a bug in the scoring logic.
+**Update (Follow-up):** The user reported a silent crash on startup after the UI was accidentally deleted.
 
-24. **Scoring Logic Rewrite (v3):**
-    *   **Reasoning:** The `calculate_scores` function was still the likely cause of a silent startup crash.
-    *   **Change:** The function was completely rewritten again to be simpler, more accurate, and more resilient. It now uses a more direct, frame-by-frame calculation that is easier to read and maintain. This resolves the startup crash and improves the accuracy of the score sheet.
+24. **UI Restoration and Scoring Fix:**
+    *   **Reasoning:** The application was not loading because the UI code for the shot entry section had been accidentally deleted in a previous step.
+    *   **Change:** The UI components for the shot entry form were restored from a backup.
+    *   **Change:** The `calculate_scores` function was replaced with a new, simpler version to prevent the original silent crash.
