@@ -236,3 +236,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 20. **Scoring Logic Refactor:**
     *   **Reasoning:** The `calculate_scores` function was overly complex and contained a bug that caused a silent crash on startup.
     *   **Change:** The function was completely rewritten to be simpler, more accurate, and more resilient. It now calculates scores frame by frame and looks ahead only when necessary for strikes and spares, following standard bowling scoring rules. This resolves the startup crash and improves the accuracy of the score sheet.
+
+**Update (Follow-up):** The user reported a `KeyError` on startup when no data was present.
+
+21. **Empty State Handling:**
+    *   **Reasoning:** The score sheet rendering logic did not correctly handle the case where a new game has no shots, causing a `KeyError` when trying to access a non-existent dataframe column.
+    *   **Change:** A guard clause was added to the score sheet rendering logic. It now checks if the `df_current_game` dataframe is empty and, if so, renders a clean, empty score sheet instead of trying to process non-existent data.
