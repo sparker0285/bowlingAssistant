@@ -261,33 +261,36 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The application was not loading because the UI code for the shot entry section had been accidentally deleted in a previous step.
     *   **Change:** The UI components for the shot entry form were restored from a backup.
     *   **Change:** The `calculate_scores` function was replaced with a new, simpler version to prevent the original silent crash.
----
-## Session from Tuesday, February 10, 2026
 
-**User Story:** The user came with a comprehensive plan to enhance the application's features and fix several outstanding bugs.
-1.  **Historical Analysis:** The user wants a feature to analyze performance across multiple sets to get strategic advice.
-2.  **Bowling Center Tracking:** The user wants to associate a bowling center with each set and have it included in the saved filename.
-3.  **Lane Switching Bug:** The lane switching logic was still incorrect, particularly when starting a new game in a set.
-4.  **Scoring Accuracy:** The scoring was not correct, especially for the 10th frame.
-5.  **New Score Sheet UI:** The user requested a visual score sheet to be displayed on the main screen.
-6.  **Automatic Split Detection:** The user wants the app to automatically detect and display splits on the score sheet.
-7.  **Editable Data:** The user wants to be able to edit shot data after it has been entered.
+---
+## Session from Saturday, February 14, 2026
+
+**Backup:** A full backup of `bowlingAssistantApp.py` was saved to `Archive/bowlingAssistantApp_backup_before_6features_20260214.py` before making the following changes. If the combined update causes issues, roll back by restoring that file and then implement features one at a time.
+
+**Plan:** Six features were implemented in one pass (Historical AI Coach, Bowling Center Tracking, Lane Switching Logic, Score Sheet and Scoring Accuracy, Automatic Split Detection, Editable Data Grid).
 
 **Changes Implemented in `bowlingAssistantApp.py`:**
 
-1.  **Full Feature Implementation:**
-    *   **Reasoning:** Multiple features and bug fixes were requested in a single, comprehensive plan.
-    *   **Change:** Added a text input for "Bowling Center" when creating a new set.
-    *   **Change:** Corrected the lane switching logic to properly alternate between frames and for subsequent games in a set.
-    *   **Change:** Implemented a new `is_split` function for automatic split detection based on the pins left standing.
-    *   **Change:** Completely refactored the `calculate_scores` function to accurately calculate scores according to standard bowling rules, including complex 10th-frame scenarios.
-    *   **Change:** Added a new visual score sheet to the main UI that displays frame-by-frame results with traditional bowling symbols.
-    *   **Change:** Implemented an editable data grid using `st.data_editor` to allow for post-entry corrections of shot data.
-    *   **Change:** Added a new "Historical Analysis" section to the sidebar, allowing users to select multiple sets from Azure and enter a custom goal for the AI to analyze.
+1. **Bowling Center Tracking:**
+    *   **Reasoning:** User wanted to associate each set with a specific bowling center (required, free text) and include it in the Azure filename.
+    *   **Change:** Added `bowling_center` column to `shots` table (ALTER TABLE). When starting a new set, the user must enter a bowling center name in a new text input; "Start New Set" is disabled until a name is entered. The center is stored in session state and written to every shot in the set. `upload_set_to_azure` now includes the bowling center in the blob name (e.g. `set-League_02-14-26-Riverside_Lanes-<set_id>.csv`). Load from Azure adds a `bowling_center` column to the dataframe if missing.
 
-**Update (Follow-up):** The user reported a series of startup crashes after the new features were implemented.
+2. **Lane Switching Logic:**
+    *   **Reasoning:** Each new game in a set should start on the opposite lane from the previous game (lane 1 = left, 2 = right); within a game, odd frames on starting lane, even on the other.
+    *   **Change:** When the user clicks "Start New Game in Set", the app reads the previous game’s starting lane from the database and sets `starting_lane` to the opposite lane for the new game. Within-game logic (odd/even frame) was already correct and unchanged.
 
-2.  **Startup Crash and UI Restoration:**
-    *   **Reasoning:** In the process of fixing a `CatalogException` and subsequent silent crashes related to the new scoring logic, the main UI components were accidentally deleted from the application file, resulting in a blank screen.
-    *   **Change:** The application code was restored from a known good backup (`bowlingAssistantApp-commit_7ce08e7.py`).
-    *   **Change:** The new, correct `calculate_scores` function was carefully re-integrated into the restored code, and all other new features (bowling center, split detection, score sheet, editable grid, etc.) were verified to be present. This resolved the startup crashes and restored all application functionality.
+3. **Score Sheet and Scoring Accuracy:**
+    *   **Reasoning:** User wanted a standard visual score sheet and a simpler, correct scoring calculation per bowl.com (including 10th frame).
+    *   **Change:** `calculate_scores` was refactored: it builds a list of ball-by-ball pin counts, then scores frame-by-frame with correct strike/spare look-ahead and frame-10 handling. A new `render_score_sheet` function displays one row per game with standard symbols (X, /, -, pin counts), a row of running totals per frame, and total score plus max possible at the far right. The score sheet is shown below the shot input for the currently selected game; the sidebar game selector is used to switch games and compare.
+
+4. **Automatic Split Detection:**
+    *   **Reasoning:** User wanted USBC-standard split detection (no manual checkbox): headpin down and a gap between remaining pins.
+    *   **Change:** Added `is_usbc_split(pins_left_list)` that returns True when pin 1 is down and there is a gap in the sorted list of standing pins. The score sheet uses this to show **S** for split leaves on first shot; no manual split checkbox in the UI.
+
+5. **Historical AI Coach:**
+    *   **Reasoning:** User wanted to select multiple saved sets from Azure and get a strategic game plan from the same AI based on a free-text goal.
+    *   **Change:** New sidebar expander "Historical Analysis" lists Azure set blobs sorted by last-modified date (newest first). User can multi-select sets and enter a goal/question in a text area. "Get game plan" downloads each selected blob to a dataframe, concatenates them, and calls new `get_ai_historical_game_plan(api_key, df_combined, user_goal, model_name)` which uses the same Gemini config with a strategic, goal-driven prompt. The result is shown in the main area under "Historical game plan."
+
+6. **Editable Data Grid:**
+    *   **Reasoning:** User wanted to edit shot data after entry (bowling_ball, ball_reaction, trajectory, pins_left, shot_result) and have the app update shot_result from pins_left and recalculate scores.
+    *   **Change:** The set data table was replaced with `st.data_editor` (key `edited_set_data`) showing all games in the set. Editable columns include frame_number, shot_number, shot_result, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction. "Save edits" writes the grid state to the database via `apply_edits_to_db`. Helper `_derive_shot_result_and_pins_from_pins_left(row, edited_df)` derives shot_result and pins_knocked_down from pins_left (and shot 1 pins for shot 2). Saving edits persists all rows and triggers a rerun so the score sheet and totals reflect the updated data.

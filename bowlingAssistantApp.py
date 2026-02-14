@@ -9,13 +9,6 @@ import re
 import pandas as pd
 import google.generativeai as genai
 
-# --- Constants ---
-PIN_NEIGHBORS = {
-    1: {2, 3}, 2: {1, 3, 4, 5}, 3: {1, 2, 5, 6}, 4: {2, 5, 7, 8}, 5: {2, 3, 4, 6, 8, 9},
-    6: {3, 5, 9, 10}, 7: {4, 8}, 8: {4, 5, 7, 9}, 9: {5, 6, 8, 10}, 10: {6, 9}
-}
-
-
 # --- AI Logic ---
 def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
     """
@@ -50,85 +43,91 @@ def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
     except Exception as e:
         return f"An error occurred while getting a suggestion: {e}"
 
-
-def get_ai_game_plan(api_key, df_sets, user_goal, model_name):
-    """Analyzes multiple sets and provides a strategic game plan."""
+def get_ai_analysis(api_key, df_game, model_name):
+    """
+    Performs a post-game analysis and provides practice recommendations.
+    """
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
-        data_summary = df_sets.to_string()
+        data_summary = df_game.to_string()
 
         prompt = f"""
-        You are an expert bowling coach reviewing a bowler's history to create a game plan.
-        Analyze the following data, which represents several past sessions:
+        You are an expert bowling coach. Your task is to analyze a completed bowling game and provide practice recommendations.
+
+        Analyze the following game data:
         {data_summary}
 
-        The bowler's goal for tonight is: "{user_goal}"
-
         YOUR TASK:
-        1.  **Identify High-Level Trends:** What are the bowler's consistent strengths and weaknesses across all these sets? (e.g., "You consistently have a higher strike percentage on the left lane," or "You struggle with 10-pin spares in later games.")
-        2.  **Analyze Equipment Performance:** Which bowling balls tend to perform best? Are there patterns where a ball works well early but struggles later?
-        3.  **Create a Strategic Game Plan:** Based on the data and the bowler's goal, provide a clear, actionable game plan for their next session. This should include:
-            *   A recommended starting ball and a target on the lane.
-            *   Key things to watch for (e.g., "If you start leaving 4-pins, that's your cue to...").
-            *   Specific adjustments to make if those cues appear (e.g., "...move 2 boards left with your feet.").
-            *   A recommendation for when to consider a ball change and which ball to switch to.
+        1.  **Identify Strengths:** What did the bowler do well in this game?
+        2.  **Identify Weaknesses:** What was the biggest struggle?
+        3.  **Provide Actionable Practice Tips:** Based on the weaknesses, suggest 1-2 specific things to work on.
 
-        Provide a concise, strategic plan.
+        Provide a concise, easy-to-read analysis.
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"An error occurred during analysis: {e}"
+        return f"An error occurred while getting analysis: {e}"
+
+def get_ai_historical_game_plan(api_key, df_combined, user_goal, model_name):
+    """
+    Strategic analysis over multiple sets. Uses same AI config; prompt is goal-driven.
+    """
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        df_combined = df_combined.sort_values(by=['set_name', 'game_number', 'id'])
+        data_summary = df_combined.to_string()
+
+        prompt = f"""
+        You are an expert bowling coach. The bowler has selected multiple past sets and is asking for a strategic game plan.
+
+        Their goal or question:
+        {user_goal}
+
+        Combined shot data from the selected sets (all games, all shots):
+        {data_summary}
+
+        YOUR TASK:
+        Provide a clear, actionable game plan. Consider patterns across sets (e.g., ball reaction, lane play, spare issues), and give specific recommendations (ball choice, line, adjustments) for the situation they described. Be concise and strategic.
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"An error occurred while getting the game plan: {e}"
 
 
 # --- Database Setup ---
 con = duckdb.connect(database='bowling.db', read_only=False)
 con.execute("CREATE SEQUENCE IF NOT EXISTS seq_shots_id START 1;")
-# Use a base schema for initial creation
 con.execute("""
-            CREATE TABLE IF NOT EXISTS shots
-            (
-                id
-                INTEGER
-                PRIMARY
-                KEY
-                DEFAULT
-                nextval
-            (
-                'seq_shots_id'
-            ),
-                set_id VARCHAR,
-                set_name VARCHAR,
-                game_id VARCHAR,
-                game_number INTEGER,
-                frame_number INTEGER,
-                shot_number INTEGER,
-                shot_result VARCHAR,
-                pins_knocked_down VARCHAR,
-                pins_left VARCHAR,
-                lane_number VARCHAR,
-                arrows_pos INTEGER,
-                breakpoint_pos INTEGER,
-                ball_reaction VARCHAR,
-                shot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-con.execute("CREATE TABLE IF NOT EXISTS arsenal (ball_name VARCHAR PRIMARY KEY);")
+    CREATE TABLE IF NOT EXISTS shots (
+        id INTEGER PRIMARY KEY DEFAULT nextval('seq_shots_id'),
+        set_id VARCHAR,
+        set_name VARCHAR,
+        game_id VARCHAR,
+        game_number INTEGER,
+        frame_number INTEGER,
+        shot_number INTEGER,
+        shot_result VARCHAR,
+        pins_knocked_down VARCHAR,
+        pins_left VARCHAR,
+        lane_number VARCHAR,
+        bowling_ball VARCHAR,
+        arrows_pos INTEGER,
+        breakpoint_pos INTEGER,
+        ball_reaction VARCHAR,
+        shot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+""")
+con.execute("""
+    CREATE TABLE IF NOT EXISTS arsenal (
+        ball_name VARCHAR PRIMARY KEY
+    );
+""")
 
-# Add new columns with error handling for backward compatibility
-schema_migrations = {
-    'bowling_ball': 'VARCHAR',
-    'bowling_center': 'VARCHAR',
-    'is_split': 'BOOLEAN'
-}
-for col, col_type in schema_migrations.items():
-    try:
-        con.execute(f"ALTER TABLE shots ADD COLUMN {col} {col_type};")
-        con.commit()
-    except duckdb.Error:
-        pass
-
+# Pre-populate the arsenal if it's empty
 if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
     default_balls = [
         "Storm Phaze II - Pin Down", "Storm IQ Tour - Pin Down", "Roto Grip Attention Star - Pin Up",
@@ -138,114 +137,179 @@ if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
         con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (ball,))
     con.commit()
 
+try:
+    con.execute("ALTER TABLE shots ADD COLUMN bowling_ball VARCHAR;")
+    con.commit()
+except duckdb.Error:
+    pass
+try:
+    con.execute("ALTER TABLE shots ADD COLUMN bowling_center VARCHAR;")
+    con.commit()
+except duckdb.Error:
+    pass
 
-# --- Scoring & Game Logic ---
-def is_split(pins_left):
-    if not pins_left or 1 in pins_left or len(pins_left) <= 1:
+# --- Scoring Logic (per bowl.com / USBC) ---
+def get_pins_from_str(pins_str):
+    if not pins_str or pins_str == "N/A" or (isinstance(pins_str, float) and pd.isna(pins_str)):
+        return []
+    s = str(pins_str).strip()
+    if not s:
+        return []
+    return [int(p.strip()) for p in s.replace(',', ' ').split() if p.strip().isdigit()]
+
+def is_usbc_split(pins_left_list):
+    """True if headpin (1) is down and there is a gap between remaining pins."""
+    if not pins_left_list or 1 in pins_left_list:
         return False
-
-    pins_left.sort()
-    for i in range(len(pins_left) - 1):
-        if pins_left[i + 1] not in PIN_NEIGHBORS.get(pins_left[i], set()):
-            q = [pins_left[i]]
-            visited = {pins_left[i]}
-            found_path = False
-            while q:
-                curr = q.pop(0)
-                if curr == pins_left[i + 1]:
-                    found_path = True
-                    break
-                for neighbor in PIN_NEIGHBORS.get(curr, set()):
-                    if neighbor in pins_left and neighbor not in visited:
-                        visited.add(neighbor)
-                        q.append(neighbor)
-            if not found_path:
-                return True
+    standing = sorted([p for p in pins_left_list if 1 <= p <= 10])
+    if len(standing) < 2:
+        return False
+    for i in range(len(standing) - 1):
+        if standing[i + 1] - standing[i] > 1:
+            return True
     return False
 
-
-def get_pins_from_str(pins_str):
-    if not pins_str or pins_str == "N/A": return []
-    return [int(p.strip()) for p in str(pins_str).split(',') if p.strip().isdigit()]
-
+def _ball_scores_from_shots(df, shots_ordered):
+    """Build list of pins knocked down per delivery for scoring."""
+    raw = []
+    for s in shots_ordered:
+        if s['shot_result'] == 'Strike':
+            raw.append(10)
+        elif s['shot_result'] == 'Spare':
+            shot1 = next((x for x in shots_ordered if x['frame_number'] == s['frame_number'] and x['shot_number'] == 1), None)
+            if shot1 is not None:
+                left = get_pins_from_str(shot1.get('pins_left'))
+                raw.append(10 - len(left) if left is not None else 10)
+            else:
+                raw.append(0)
+        else:
+            kn = get_pins_from_str(s.get('pins_knocked_down'))
+            raw.append(len(kn) if kn is not None else 0)
+    return raw
 
 def calculate_scores(df):
-    if df.empty:
+    """Returns (frame_scores[10], total_score, max_possible). Simple frame-by-frame per USBC."""
+    if df is None or df.empty:
         return [None] * 10, 0, 300
 
-    shots = df.sort_values(by='id').to_dict('records')
+    shots = df.sort_values(by=['frame_number', 'shot_number', 'id']).to_dict('records')
+    balls = _ball_scores_from_shots(df, shots)
     frame_scores = [None] * 10
-    running_total = 0
+    total = 0
+    i = 0
 
-    for i in range(1, 11):  # Frames 1-10
-        frame_shots = [s for s in shots if s.get('frame_number') == i]
-        if not frame_shots:
+    for frame in range(10):
+        frame_num = frame + 1
+        if i >= len(shots):
+            break
+        cur = shots[i]
+        if cur['frame_number'] != frame_num:
             break
 
-        frame_score = 0
-        is_frame_complete = False
-
-        shot1 = frame_shots[0]
-        shot1_pins_left = get_pins_from_str(shot1.get('pins_left', ''))
-        shot1_pins_knocked = 10 - len(shot1_pins_left)
-
-        if i < 10:
-            if shot1.get('shot_result') == 'Strike':
-                future_shots = [s for s in shots if s['id'] > shot1['id']]
-                if len(future_shots) >= 2:
-                    bonus1_pins_left = get_pins_from_str(future_shots[0].get('pins_left', ''))
-                    bonus1 = 10 - len(bonus1_pins_left)
-
-                    if future_shots[0].get('shot_result') == 'Strike':
-                        bonus2 = 10 - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
+        if frame_num < 10:
+            if cur['shot_result'] == 'Strike':
+                # 10 + next two balls
+                if i + 2 < len(balls):
+                    total += 10 + balls[i + 1] + balls[i + 2]
+                else:
+                    break
+                frame_scores[frame] = total
+                i += 1
+            else:
+                # two shots in frame
+                if i + 1 >= len(shots) or shots[i + 1]['frame_number'] != frame_num:
+                    break
+                s1, s2 = balls[i], balls[i + 1]
+                if shots[i + 1]['shot_result'] == 'Spare':
+                    if i + 2 < len(balls):
+                        total += 10 + balls[i + 2]
                     else:
-                        bonus2 = len(bonus1_pins_left) - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
-                    frame_score = 10 + bonus1 + bonus2
-                    is_frame_complete = True
-            else:  # Leave
-                if len(frame_shots) > 1:
-                    shot2 = frame_shots[1]
-                    shot2_pins_knocked = len(get_pins_from_str(shot1.get('pins_left'))) - len(
-                        get_pins_from_str(shot2.get('pins_left')))
-                    if shot2.get('shot_result') == 'Spare':
-                        future_shots = [s for s in shots if s['id'] > shot2['id']]
-                        if future_shots:
-                            bonus = 10 - len(get_pins_from_str(future_shots[0].get('pins_left')))
-                            frame_score = 10 + bonus
-                            is_frame_complete = True
-                    else:  # Open
-                        frame_score = shot1_pins_knocked + shot2_pins_knocked
-                        is_frame_complete = True
-        else:  # 10th Frame
-            shot2 = frame_shots[1] if len(frame_shots) > 1 else None
-            shot3 = frame_shots[2] if len(frame_shots) > 2 else None
-
-            frame_score = shot1_pins_knocked
-            if shot2:
-                if shot1.get('shot_result') == 'Strike':
-                    frame_score += 10 - len(get_pins_from_str(shot2.get('pins_left')))
+                        break
                 else:
-                    frame_score += len(get_pins_from_str(shot1.get('pins_left'))) - len(
-                        get_pins_from_str(shot2.get('pins_left')))
-            if shot3:
-                if shot2.get('shot_result') == 'Strike' or shot2.get('shot_result') == 'Spare':
-                    frame_score += 10 - len(get_pins_from_str(shot3.get('pins_left')))
-                else:
-                    frame_score += len(get_pins_from_str(shot2.get('pins_left', ''))) - len(
-                        get_pins_from_str(shot3.get('pins_left')))
+                    total += s1 + s2
+                frame_scores[frame] = total
+                i += 2
+        else:
+            # Frame 10: sum of all balls in frame (1, 2, or 3)
+            frame_10_indices = [j for j in range(len(shots)) if shots[j]['frame_number'] == 10]
+            frame_10_balls = [balls[j] for j in frame_10_indices]
+            total += sum(frame_10_balls)
+            frame_scores[frame] = total
+            i += len(frame_10_indices)
 
-            if shot1.get('shot_result') == 'Strike':
-                if len(frame_shots) == 3: is_frame_complete = True
-            elif shot2 and shot2.get('shot_result') == 'Spare':
-                if len(frame_shots) == 3: is_frame_complete = True
-            elif len(frame_shots) == 2:
-                is_frame_complete = True
+    # Max possible: filled frames count; current incomplete can be 10+10+10 or 10+10 or 10 or open
+    max_score = 0
+    last_done = next((j for j in range(9, -1, -1) if frame_scores[j] is not None), -1)
+    if last_done >= 0:
+        max_score = frame_scores[last_done]
+    start = last_done + 1
+    if start < 10:
+        # Incomplete frame: assume best (strike or spare+strike)
+        max_score += 30
+        for _ in range(start + 1, 10):
+            max_score += 30
+    return frame_scores, total, max_score if max_score > 0 else 300
 
-        if is_frame_complete:
-            running_total += frame_score
-            frame_scores[i - 1] = running_total
+def _shot_display_symbol(shot, is_first_shot):
+    """Symbol for score sheet: X, /, -, S (split), or count. shot is a dict with shot_result, pins_left, pins_knocked_down."""
+    shot_result = shot.get('shot_result') or ''
+    pins_left_str = shot.get('pins_left')
+    pins = get_pins_from_str(pins_left_str) if pins_left_str else []
+    if shot_result == 'Strike':
+        return 'X'
+    if shot_result == 'Spare':
+        return '/'
+    if shot_result == 'Leave' and is_first_shot:
+        if is_usbc_split(pins):
+            return 'S'
+        return str(10 - len(pins)) if pins else '-'
+    if shot_result == 'Open':
+        kn = get_pins_from_str(shot.get('pins_knocked_down'))
+        return str(len(kn)) if kn else '-'
+    return '-'
 
-    return frame_scores, running_total, 300
+def render_score_sheet(df_game, frame_scores, total_score, max_score):
+    """One-row score sheet: 10 frames with symbols, running total, max at end."""
+    if df_game is None or df_game.empty:
+        frames_row = "| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Total | Max |"
+        st.markdown(frames_row)
+        return
+
+    shots = df_game.sort_values(by=['frame_number', 'shot_number', 'id']).to_dict('records')
+    by_frame = {}
+    for s in shots:
+        fn = int(s['frame_number'])
+        if fn not in by_frame:
+            by_frame[fn] = []
+        by_frame[fn].append(s)
+
+    cells = []
+    for f in range(1, 11):
+        if f not in by_frame:
+            cells.append("  ")
+            continue
+        fr = by_frame[f]
+        if len(fr) == 1:
+            sym1 = _shot_display_symbol(fr[0], True)
+            cells.append(sym1)
+        elif len(fr) == 2:
+            sym1 = _shot_display_symbol(fr[0], True)
+            sym2 = _shot_display_symbol(fr[1], False)
+            cells.append(f"{sym1} {sym2}")
+        else:
+            sym1 = _shot_display_symbol(fr[0], True)
+            sym2 = _shot_display_symbol(fr[1], False)
+            sym3 = _shot_display_symbol(fr[2], False)
+            cells.append(f"{sym1} {sym2} {sym3}")
+
+    total_str = str(total_score)
+    max_str = str(max_score)
+    run_cells = [str(frame_scores[f - 1]) if f - 1 < len(frame_scores) and frame_scores[f - 1] is not None else "" for f in range(1, 11)]
+    row = " | ".join(cells) + " | **" + total_str + "** | " + max_str
+    run_row = " | ".join(run_cells)
+    st.markdown("**Frames:** 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | **Total** | Max")
+    st.markdown(row)
+    st.markdown("**Running:** " + run_row)
 
 
 # --- Azure Integration ---
@@ -262,16 +326,13 @@ def get_azure_client():
         if connection_string:
             return BlobServiceClient.from_connection_string(connection_string)
         elif account_name:
-            return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net",
-                                     credential=DefaultAzureCredential())
+            return BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net", credential=DefaultAzureCredential())
         else:
-            st.error(
-                "Azure credentials not found. Please add `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME`.")
+            st.error("Azure credentials not found. Please add `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_ACCOUNT_NAME`.")
             return None
     except Exception as e:
         st.error(f"Failed to connect to Azure: {e}")
         return None
-
 
 def upload_set_to_azure(con, set_id):
     blob_service_client = get_azure_client()
@@ -285,19 +346,19 @@ def upload_set_to_azure(con, set_id):
             return
 
         set_name = df['set_name'].iloc[0]
-        center_name = df['bowling_center'].iloc[0]
-        filename = f"set-{center_name}-{set_name}-{set_id}.csv".replace(' ', '_')
-
+        bowling_center = "Unknown"
+        if 'bowling_center' in df.columns and pd.notna(df['bowling_center'].iloc[0]) and str(df['bowling_center'].iloc[0]).strip():
+            bowling_center = str(df['bowling_center'].iloc[0]).strip().replace(' ', '_')
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
-
-        blob_client = blob_service_client.get_blob_client(container=container_name, blob=filename)
+        
+        blob_name = f"set-{set_name.replace(' ', '_')}-{bowling_center}-{set_id}.csv"
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
         blob_client.upload_blob(csv_buffer.getvalue(), overwrite=True)
-
+        
         st.success(f"Set '{set_name}' saved successfully to Azure.")
     except Exception as e:
         st.error(f"An unexpected error occurred during upload: {e}")
-
 
 def download_and_load_set(blob_name):
     blob_service_client = get_azure_client()
@@ -306,7 +367,7 @@ def download_and_load_set(blob_name):
     try:
         container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
         blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
-
+        
         downloader = blob_client.download_blob()
         df = pd.read_csv(io.BytesIO(downloader.readall()))
 
@@ -314,31 +375,92 @@ def download_and_load_set(blob_name):
             st.error("Downloaded file is not a valid set file.")
             return
 
-        con.execute("DELETE FROM shots")
+        if 'bowling_center' not in df.columns:
+            df['bowling_center'] = ''
 
+        set_id_to_load = df['set_id'].iloc[0]
+        con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
+        
         con.register('df_to_insert', df)
         con.execute('INSERT INTO shots SELECT * FROM df_to_insert')
         con.unregister('df_to_insert')
         con.commit()
 
         st.success(f"Successfully loaded set '{df['set_name'].iloc[0]}'.")
-        st.session_state.clear()
+        st.session_state.set_id = set_id_to_load
+        st.session_state.state_restored = False
         st.rerun()
 
     except Exception as e:
         st.error(f"Failed to download or load set: {e}")
 
+def _derive_shot_result_and_pins_from_pins_left(row, edited_df):
+    """Given a row and the full edited df, derive shot_result and pins_knocked_down from pins_left."""
+    frame = row.get('frame_number')
+    shot = row.get('shot_number')
+    pins_left_str = row.get('pins_left')
+    pins_left = get_pins_from_str(pins_left_str) if pins_left_str is not None else []
+    if shot == 1:
+        if not pins_left or len(pins_left) == 0:
+            return 'Strike', '1, 2, 3, 4, 5, 6, 7, 8, 9, 10'
+        return 'Leave', ', '.join(str(p) for p in range(1, 11) if p not in pins_left)
+    else:
+        shot1_row = edited_df[(edited_df['game_id'] == row['game_id']) & (edited_df['frame_number'] == frame) & (edited_df['shot_number'] == 1)]
+        if shot1_row.empty:
+            return row.get('shot_result'), row.get('pins_knocked_down')
+        pins_after_1 = get_pins_from_str(shot1_row.iloc[0].get('pins_left'))
+        if not pins_after_1:
+            pins_after_1 = list(range(1, 11))
+        if not pins_left or len(pins_left) == 0:
+            return 'Spare', ', '.join(str(p) for p in pins_after_1)
+        knocked_2 = [p for p in pins_after_1 if p not in pins_left]
+        return 'Open', ', '.join(str(p) for p in knocked_2) if knocked_2 else 'N/A'
+
+def apply_edits_to_db(con, edited_df):
+    """Persist edited dataframe to DB. Derives shot_result/pins_knocked_down from pins_left for consistency."""
+    if edited_df is None or edited_df.empty:
+        return
+    for _, row in edited_df.iterrows():
+        sid = row.get('id')
+        if pd.isna(sid) or sid is None:
+            continue
+        shot_result, pins_knocked_down = _derive_shot_result_and_pins_from_pins_left(row, edited_df)
+        pins_left = row.get('pins_left')
+        pins_left_str = str(pins_left) if pins_left is not None and (not isinstance(pins_left, float) or not pd.isna(pins_left)) else ''
+        lane_number = row.get('lane_number')
+        bowling_ball = row.get('bowling_ball')
+        arrows_pos = row.get('arrows_pos')
+        breakpoint_pos = row.get('breakpoint_pos')
+        ball_reaction = row.get('ball_reaction')
+        con.execute("""
+            UPDATE shots SET shot_result=?, pins_knocked_down=?, pins_left=?, lane_number=?, bowling_ball=?, arrows_pos=?, breakpoint_pos=?, ball_reaction=?
+            WHERE id=?
+        """, (shot_result, pins_knocked_down, pins_left_str, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, int(sid)))
+    con.commit()
+
+def download_blob_to_dataframe(blob_name):
+    """Download a single set blob from Azure and return as DataFrame, or None on error."""
+    blob_service_client = get_azure_client()
+    if not blob_service_client:
+        return None
+    try:
+        container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        downloader = blob_client.download_blob()
+        return pd.read_csv(io.BytesIO(downloader.readall()))
+    except Exception:
+        return None
+
 
 # --- Main Application ---
 st.set_page_config(layout="wide")
-st.title("🎳 PinDeck: Bowling Assistant")
+st.title("🎳 PinDeck: Bowling Set Tracker")
 
-
-def initialize_set(set_id=None, set_name=None, center_name=""):
+def initialize_set(set_id=None, set_name=None, bowling_center=None):
     if set_id is None:
         st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         st.session_state.set_name = set_name or f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
-        st.session_state.bowling_center = center_name
+        st.session_state.bowling_center = (bowling_center or "").strip()
         st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         st.session_state.game_number = 1
         st.session_state.current_frame = 1
@@ -349,12 +471,12 @@ def initialize_set(set_id=None, set_name=None, center_name=""):
     else:
         st.session_state.set_id = set_id
         st.session_state.set_name = set_name
+        first_shot = con.execute("SELECT bowling_center FROM shots WHERE set_id = ? LIMIT 1", [set_id]).fetchone()
+        st.session_state.bowling_center = (first_shot[0] or "") if first_shot and first_shot[0] else ""
 
-        latest_game = con.execute(
-            "SELECT game_id, game_number, bowling_center FROM shots WHERE set_id = ? ORDER BY game_number DESC, id DESC LIMIT 1",
-            [set_id]).fetchone()
+        latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC, id DESC LIMIT 1", [set_id]).fetchone()
         if latest_game:
-            st.session_state.game_id, st.session_state.game_number, st.session_state.bowling_center = latest_game
+            st.session_state.game_id, st.session_state.game_number = latest_game
             restore_game_state()
         else:
             st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -365,20 +487,19 @@ def initialize_set(set_id=None, set_name=None, center_name=""):
             st.session_state.starting_lane = "Left Lane"
             st.session_state.game_over = False
 
-
 def restore_game_state():
     try:
-        latest_shot = con.execute("SELECT * FROM shots WHERE game_id = ? ORDER BY id DESC LIMIT 1",
-                                  [st.session_state.game_id]).fetchone()
+        latest_shot = con.execute("SELECT * FROM shots WHERE game_id = ? ORDER BY id DESC LIMIT 1", [st.session_state.game_id]).fetchone()
         if not latest_shot:
             st.session_state.current_frame = 1
             st.session_state.current_shot = 1
             st.session_state.pins_left_after_first_shot = []
+            st.session_state.starting_lane = "Left Lane"
             st.session_state.game_over = False
             return
 
-        (id, set_id, set_name, center, game_id, game_number, frame, shot,
-         shot_result, _, pins_left_str, *__) = latest_shot
+        (id, set_id, set_name, game_id, game_number, frame, shot, 
+         shot_result, _, pins_left_str, _, *__) = latest_shot
 
         if frame is None or shot is None:
             raise ValueError("Corrupted data in last shot.")
@@ -395,11 +516,9 @@ def restore_game_state():
             else:
                 next_shot = 2
         else:
-            shots_in_frame10 = con.execute(
-                "SELECT shot_number, shot_result FROM shots WHERE game_id = ? AND frame_number = 10",
-                [game_id]).fetchall()
+            shots_in_frame10 = con.execute("SELECT shot_number, shot_result FROM shots WHERE game_id = ? AND frame_number = 10", [game_id]).fetchall()
             shot1_res = shots_in_frame10[0][1] if len(shots_in_frame10) > 0 else ''
-
+            
             if shot == 1:
                 next_shot = 2
                 if shot_result == "Strike": pins_left = []
@@ -407,8 +526,7 @@ def restore_game_state():
                 if shot1_res == "Strike" or shot_result == "Spare":
                     next_shot = 3
                     pins_left = []
-                else:
-                    game_over = True
+                else: game_over = True
             else:
                 game_over = True
 
@@ -416,19 +534,16 @@ def restore_game_state():
         st.session_state.current_shot = next_shot
         st.session_state.pins_left_after_first_shot = pins_left
         st.session_state.game_over = game_over
-
-        first_shot_of_game = con.execute(
-            "SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1",
-            [game_id]).fetchone()
+        
+        first_shot_of_game = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [game_id]).fetchone()
         st.session_state.starting_lane = first_shot_of_game[0] if first_shot_of_game else "Left Lane"
-
+        
     except Exception as e:
         st.warning(f"Could not restore game state due to an error: {e}. Starting a fresh game.")
         st.session_state.current_frame = 1
         st.session_state.current_shot = 1
         st.session_state.pins_left_after_first_shot = []
         st.session_state.game_over = False
-
 
 if 'set_id' not in st.session_state:
     initialize_set()
@@ -446,7 +561,7 @@ if set_map:
         current_set_index = list(set_map.keys()).index(st.session_state.set_id)
     except (ValueError, KeyError):
         current_set_index = 0
-
+    
     selected_set_name = st.sidebar.selectbox("Select Set", options=list(set_map.values()), index=current_set_index)
     if set_map and selected_set_name in set_map.values():
         selected_set_id = [sid for sid, name in set_map.items() if name == selected_set_name][0]
@@ -455,33 +570,23 @@ if set_map:
             initialize_set(selected_set_id, selected_set_name)
             st.rerun()
 
-if st.sidebar.button("Start New Set"):
-    st.session_state.new_set_prompt = True
+st.sidebar.caption("Start New Set (bowling center required)")
+new_set_bowling_center = st.sidebar.text_input("Bowling center name", key="new_set_bowling_center", placeholder="e.g. Riverside Lanes")
+if st.sidebar.button("Start New Set", disabled=not (new_set_bowling_center and str(new_set_bowling_center).strip())):
+    today_str = datetime.datetime.now().strftime('%m-%d-%y')
+    base_name = f"League {today_str}"
+    existing_sets_today = con.execute("SELECT set_name FROM shots WHERE set_name LIKE ? ORDER BY set_name DESC", [f"{base_name}%"]).fetchall()
+    
+    next_seq = 1
+    if existing_sets_today:
+        last_set_name = existing_sets_today[0][0]
+        match = re.search(r'_(\d+)$', last_set_name)
+        if match: next_seq = int(match.group(1)) + 1
+        else: next_seq = 2
 
-if 'new_set_prompt' in st.session_state and st.session_state.new_set_prompt:
-    with st.form("new_set_form"):
-        st.subheader("Start New Set")
-        new_center_name = st.text_input("Bowling Center Name")
-        submitted = st.form_submit_button("Start")
-        if submitted:
-            today_str = datetime.datetime.now().strftime('%m-%d-%y')
-            base_name = f"League {today_str}"
-            existing_sets_today = con.execute("SELECT set_name FROM shots WHERE set_name LIKE ? ORDER BY set_name DESC",
-                                              [f"{base_name}%"]).fetchall()
-
-            next_seq = 1
-            if existing_sets_today:
-                last_set_name = existing_sets_today[0][0]
-                match = re.search(r'_(\d+)$', last_set_name)
-                if match:
-                    next_seq = int(match.group(1)) + 1
-                else:
-                    next_seq = 2
-
-            new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
-            initialize_set(set_name=new_set_name, center_name=new_center_name)
-            st.session_state.new_set_prompt = False
-            st.rerun()
+    new_set_name = f"{base_name}_{next_seq}" if next_seq > 1 else base_name
+    initialize_set(set_name=new_set_name, bowling_center=str(new_set_bowling_center).strip())
+    st.rerun()
 
 new_name = st.sidebar.text_input("Rename Current Set", value=st.session_state.get('set_name', ''))
 if st.sidebar.button("Rename Set"):
@@ -494,13 +599,13 @@ if st.sidebar.button("Rename Set"):
 with st.sidebar.expander("🎳 Manage Arsenal"):
     st.markdown("**Your Full Arsenal**")
     arsenal = [row[0] for row in con.execute("SELECT ball_name FROM arsenal ORDER BY ball_name").fetchall()]
-
+    
     if 'balls_in_bag' not in st.session_state:
         st.session_state.balls_in_bag = arsenal
 
     st.multiselect(
-        "Select balls in your bag for this session:",
-        options=arsenal,
+        "Select balls in your bag for this session:", 
+        options=arsenal, 
         key="balls_in_bag"
     )
 
@@ -520,7 +625,7 @@ with st.sidebar.expander("🎳 Manage Arsenal"):
 with st.sidebar.expander("☁️ Azure Cloud Storage"):
     if st.button("Save Current Set to Azure"):
         upload_set_to_azure(con, st.session_state.set_id)
-
+    
     azure_client = get_azure_client()
     if azure_client:
         try:
@@ -536,44 +641,42 @@ with st.sidebar.expander("☁️ Azure Cloud Storage"):
         except Exception as e:
             st.error(f"Could not list Azure blobs: {e}")
 
+with st.sidebar.expander("📜 Historical Analysis"):
+    st.caption("Select saved sets (newest first) and ask for a game plan.")
+    azure_client_ha = get_azure_client()
+    historical_blob_options = []
+    if azure_client_ha:
+        try:
+            container_name = st.secrets.get("AZURE_STORAGE_CONTAINER_NAME")
+            if container_name:
+                container_client = azure_client_ha.get_container_client(container_name)
+                blobs = [b for b in container_client.list_blobs() if b.name.startswith('set-')]
+                def _blob_sort_key(b):
+                    t = b.last_modified
+                    if t is None:
+                        return (0, datetime.datetime.min)
+                    return (1, t)
+                blobs_sorted = sorted(blobs, key=_blob_sort_key, reverse=True)
+                historical_blob_options = [b.name for b in blobs_sorted]
+        except Exception:
+            pass
+    if historical_blob_options:
+        st.multiselect("Select sets", options=historical_blob_options, key="historical_sets", default=[])
+        st.text_area("Your goal or question", key="historical_goal", placeholder="e.g. Look at my last 4 sets and give me a game plan for tonight...", height=80)
+        if st.button("Get game plan", key="btn_historical_plan"):
+            st.session_state.run_historical_plan = True
+            st.rerun()
+    else:
+        st.info("Save sets to Azure first, then they will appear here.")
+
 with st.sidebar.expander("🤖 AI Settings"):
     model_options = {
-        "Gemini 1.5 Flash (Recommended)": "gemini-1.5-flash-latest",
+        "Gemini 2.5 Flash (Recommended)": "gemini-2.5-flash",
+        "Gemini 1.5 Flash (Economical)": "gemini-1.5-flash"
     }
     selected_model_label = st.selectbox("Select AI Model", options=list(model_options.keys()))
     selected_model_id = model_options[selected_model_label]
-
-with st.sidebar.expander("📈 Historical Analysis"):
-    st.markdown("**Analyze Past Performance**")
-    all_blobs = []
-    if azure_client:
-        try:
-            container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
-            container_client = azure_client.get_container_client(container_name)
-            all_blobs = [b.name for b in container_client.list_blobs() if b.name.startswith('set-')]
-        except Exception:
-            pass
-
-    if all_blobs:
-        selected_sets = st.multiselect("Select sets to analyze:", options=all_blobs)
-        user_goal = st.text_area("What is your goal for tonight's session?")
-        if st.button("Get Game Plan"):
-            if selected_sets and user_goal:
-                with st.spinner("Analyzing your history..."):
-                    all_dfs = []
-                    for blob_name in selected_sets:
-                        blob_client = azure_client.get_blob_client(container=container_name, blob=blob_name)
-                        downloader = blob_client.download_blob()
-                        all_dfs.append(pd.read_csv(io.BytesIO(downloader.readall())))
-                    combined_df = pd.concat(all_dfs, ignore_index=True)
-
-                    game_plan = get_ai_game_plan(st.secrets["GEMINI_API_KEY"], combined_df, user_goal,
-                                                 selected_model_id)
-                    st.markdown(game_plan)
-            else:
-                st.warning("Please select at least one set and define your goal.")
-    else:
-        st.info("No sets found in Azure to analyze.")
+    st.session_state.selected_model_id = selected_model_id
 
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
@@ -593,8 +696,7 @@ game_map = {f"Game {g}": g for g in games_in_set}
 if st.session_state.game_number not in game_map.values():
     game_map[f"Game {st.session_state.game_number}"] = st.session_state.game_number
 
-selected_game_name = st.sidebar.selectbox("Select Game", options=list(game_map.keys()),
-                                          index=list(game_map.values()).index(st.session_state.game_number))
+selected_game_name = st.sidebar.selectbox("Select Game", options=list(game_map.keys()), index=list(game_map.values()).index(st.session_state.game_number))
 selected_game_number = game_map[selected_game_name]
 
 if selected_game_number != st.session_state.game_number:
@@ -606,19 +708,20 @@ if selected_game_number != st.session_state.game_number:
 
 if st.sidebar.button("Start New Game in Set"):
     new_game_num = (max(games_in_set) if games_in_set.size > 0 else 0) + 1
+    # Next game starts on the opposite lane from the previous game (lane 1 = left, 2 = right)
+    prev_starting_lane = "Left Lane"
+    if games_in_set.size > 0:
+        prev_game_num = int(max(games_in_set))
+        prev_first = con.execute("SELECT lane_number FROM shots WHERE set_id = ? AND game_number = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.set_id, prev_game_num]).fetchone()
+        if prev_first and prev_first[0]:
+            prev_starting_lane = prev_first[0]
+    st.session_state.starting_lane = "Right Lane" if prev_starting_lane == "Left Lane" else "Left Lane"
     st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     st.session_state.game_number = new_game_num
     st.session_state.current_frame = 1
     st.session_state.current_shot = 1
+    st.session_state.pins_left_after_first_shot = []
     st.session_state.game_over = False
-
-    if len(df_set['game_number'].unique()) > 0:
-        last_game_start_lane = con.execute(
-            "SELECT starting_lane FROM shots WHERE set_id = ? AND game_number = ? AND frame_number = 1 AND shot_number = 1",
-            [st.session_state.set_id, new_game_num - 1]).fetchone()
-        if last_game_start_lane:
-            st.session_state.starting_lane = "Right Lane" if last_game_start_lane[0] == "Left Lane" else "Left Lane"
-
     st.rerun()
 
 df_current_game = df_set[df_set['game_number'] == st.session_state.game_number] if not df_set.empty else pd.DataFrame()
@@ -631,188 +734,212 @@ if not st.session_state.game_over:
     st.sidebar.metric("Max Possible", max_score)
 
 # --- Shot Input Area ---
-if 'new_set_prompt' not in st.session_state or not st.session_state.new_set_prompt:
-    st.header(f"Entering Data for: {st.session_state.set_name} - Game {st.session_state.game_number}")
-    if st.session_state.game_over:
-        st.success("🎉 Game Over! Start a new game to continue.")
+st.header(f"Entering Data for: {st.session_state.set_name} - Game {st.session_state.game_number}")
+if st.session_state.game_over:
+    st.success("🎉 Game Over! Start a new game to continue.")
+else:
+    st.subheader(f"Frame {st.session_state.current_frame} - Shot {st.session_state.current_shot}")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        shot_result_options = []
+        if st.session_state.current_frame == 10:
+            if st.session_state.current_shot == 1: shot_result_options = ["Strike", "Leave"]
+            elif st.session_state.current_shot == 2:
+                shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
+                shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
+                shot_result_options = ["Strike", "Leave"] if shot1_res == 'Strike' else ["Spare", "Open"]
+            else: shot_result_options = ["Strike", "Leave", "Open"]
+        else:
+            shot_result_options = ["Strike", "Leave"] if st.session_state.current_shot == 1 else ["Spare", "Open"]
+        st.radio("Shot Result", shot_result_options, key="shot_result", horizontal=True)
+    
+    with col2:
+        if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
+            st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
+        
+        if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
+            first_shot_db = con.execute("SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1", [st.session_state.game_id]).fetchone()
+            st.session_state.starting_lane = first_shot_db[0] if first_shot_db else "Left Lane"
+
+        is_odd_frame = st.session_state.current_frame % 2 != 0
+        starts_on_left = st.session_state.starting_lane == "Left Lane"
+        lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
+        st.markdown(f"**Current Lane:** {lane_number}")
+
+    # Ball Selection
+    balls_in_bag = st.session_state.get('balls_in_bag', [])
+    last_used_ball = st.session_state.get('last_used_ball')
+    default_index = 0
+    if last_used_ball and last_used_ball in balls_in_bag:
+        default_index = balls_in_bag.index(last_used_ball)
+    st.selectbox("Bowling Ball", options=balls_in_bag, key="bowling_ball", index=default_index)
+
+    if st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
+        st.subheader("Ball Trajectory")
+        st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
+        st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
+
+    st.text_input("Ball Reaction", key="ball_reaction")
+    
+    st.subheader("Pins Left Standing")
+    st.code("""
+    7   8   9   10
+      4   5   6
+        2   3
+          1
+    """, language=None)
+
+    is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
+    
+    if st.session_state.current_shot == 1:
+        options = list(range(1, 11))
+        help_text = "Select the pins left standing after your first shot."
     else:
-        st.subheader(f"Frame {st.session_state.current_frame} - Shot {st.session_state.current_shot}")
+        options = st.session_state.get('pins_left_after_first_shot', [])
+        help_text = "Select the pins still standing to record an open frame."
 
-        col1, col2 = st.columns(2)
-        with col1:
-            shot_result_options = []
-            if st.session_state.current_frame == 10:
-                if st.session_state.current_shot == 1:
-                    shot_result_options = ["Strike", "Leave"]
-                elif st.session_state.current_shot == 2:
-                    shot1_res_df = df_current_game[
-                        (df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
-                    shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
-                    shot_result_options = ["Strike", "Leave"] if shot1_res == 'Strike' else ["Spare", "Open"]
-                else:
-                    shot_result_options = ["Strike", "Leave", "Open"]
-            else:
-                shot_result_options = ["Strike", "Leave"] if st.session_state.current_shot == 1 else ["Spare", "Open"]
-            st.radio("Shot Result", shot_result_options, key="shot_result", horizontal=True)
+    st.multiselect(
+        "Pins Left Standing",
+        options=options,
+        key="pins_left_multiselect",
+        help=help_text,
+        disabled=is_spare_or_strike
+    )
 
-        with col2:
-            if st.session_state.current_frame == 1 and st.session_state.current_shot == 1:
-                st.selectbox("Starting Lane", ["Left Lane", "Right Lane"], key="starting_lane")
-
-            if 'starting_lane' not in st.session_state or not st.session_state.starting_lane:
-                first_shot_db = con.execute(
-                    "SELECT lane_number FROM shots WHERE game_id = ? AND frame_number = 1 AND shot_number = 1",
-                    [st.session_state.game_id]).fetchone()
-                st.session_state.starting_lane = first_shot_db[0] if first_shot_db else "Left Lane"
-
-            is_odd_frame = st.session_state.current_frame % 2 != 0
-            starts_on_left = st.session_state.starting_lane == "Left Lane"
-            lane_number = st.session_state.starting_lane if is_odd_frame else (
-                "Right Lane" if starts_on_left else "Left Lane")
-            st.markdown(f"**Current Lane:** {lane_number}")
-
-        balls_in_bag = st.session_state.get('balls_in_bag', [])
-        last_used_ball = st.session_state.get('last_used_ball')
-        default_index = 0
-        if last_used_ball and last_used_ball in balls_in_bag:
-            default_index = balls_in_bag.index(last_used_ball)
-        st.selectbox("Bowling Ball", options=balls_in_bag, key="bowling_ball", index=default_index)
-
-        if st.session_state.current_shot == 1 or (
-                st.session_state.current_frame == 10 and st.session_state.current_shot > 1):
-            st.subheader("Ball Trajectory")
-            st.selectbox("Position at Arrows", options=list(range(1, 40)), index=16, key="arrows_pos")
-            st.selectbox("Position at Breakpoint", options=list(range(1, 40)), index=9, key="breakpoint_pos")
-
-        st.text_input("Ball Reaction", key="ball_reaction")
-
-        st.subheader("Pins Left Standing")
-        st.code("7 8 9 10\n  4 5 6\n    2 3\n      1", language=None)
-
-        is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
+    def submit_shot():
+        use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
+        arrows = st.session_state.arrows_pos if use_trajectory else None
+        breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
+        
+        shot_res = st.session_state.shot_result
+        pins_left_standing = st.session_state.pins_left_multiselect
+        pins_knocked_down_str = "N/A"
 
         if st.session_state.current_shot == 1:
-            options = list(range(1, 11))
-            help_text = "Select the pins left standing after your first shot."
+            if shot_res == "Strike":
+                st.session_state.pins_left_after_first_shot = []
+                pins_knocked_down_str = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+            else:
+                st.session_state.pins_left_after_first_shot = pins_left_standing
+                knocked_down = [p for p in range(1, 11) if p not in pins_left_standing]
+                pins_knocked_down_str = ", ".join(map(str, knocked_down))
         else:
-            options = st.session_state.get('pins_left_after_first_shot', [])
-            help_text = "Select the pins still standing to record an open frame."
+            prev_pins_left = st.session_state.get('pins_left_after_first_shot', [])
+            if shot_res == "Spare":
+                pins_knocked_down_str = ", ".join(map(str, prev_pins_left))
+            else:
+                knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
+                pins_knocked_down_str = ", ".join(map(str, knocked_down))
 
-        st.multiselect(
-            "Pins Left Standing",
-            options=options,
-            key="pins_left_multiselect",
-            help=help_text,
-            disabled=is_spare_or_strike
+        pins_left_standing_str = ", ".join(map(str, pins_left_standing))
+        st.session_state.last_used_ball = st.session_state.bowling_ball
+
+        bowling_center = getattr(st.session_state, 'bowling_center', '') or ''
+        con.execute(
+            "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, bowling_center) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, st.session_state.bowling_ball, arrows, breakpoint, st.session_state.ball_reaction, bowling_center)
         )
-
-
-        def submit_shot():
-            use_trajectory = st.session_state.current_shot == 1 or (
-                        st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
-            arrows = st.session_state.arrows_pos if use_trajectory else None
-            breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
-
-            shot_res = st.session_state.shot_result
-            pins_left_standing = st.session_state.pins_left_multiselect
-            pins_knocked_down_str = "N/A"
-            split = False
-
+        con.commit()
+        
+        if st.session_state.current_frame < 10:
+            if st.session_state.current_shot == 2 or shot_res == "Strike":
+                st.session_state.current_frame += 1
+                st.session_state.current_shot = 1
+                st.session_state.pins_left_after_first_shot = []
+            else:
+                st.session_state.current_shot = 2
+        else:
+            shot1_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
+            shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
             if st.session_state.current_shot == 1:
-                if shot_res == "Strike":
+                st.session_state.current_shot = 2
+                if shot_res == "Strike": st.session_state.pins_left_after_first_shot = []
+            elif st.session_state.current_shot == 2:
+                if shot1_res == "Strike" or shot_res == "Spare":
+                    st.session_state.current_shot = 3
                     st.session_state.pins_left_after_first_shot = []
-                    pins_knocked_down_str = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
-                else:
-                    st.session_state.pins_left_after_first_shot = pins_left_standing
-                    knocked_down = [p for p in range(1, 11) if p not in pins_left_standing]
-                    pins_knocked_down_str = ", ".join(map(str, knocked_down))
-                    split = is_split(pins_left_standing)
+                else: st.session_state.game_over = True
             else:
-                prev_pins_left = st.session_state.get('pins_left_after_first_shot', [])
-                if shot_res == "Spare":
-                    pins_knocked_down_str = ", ".join(map(str, prev_pins_left))
-                else:
-                    knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
-                    pins_knocked_down_str = ", ".join(map(str, knocked_down))
+                st.session_state.game_over = True
+        
+        st.session_state.pins_left_multiselect = []
+        st.session_state.ball_reaction = ""
+        
+    st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 
-            pins_left_standing_str = ", ".join(map(str, pins_left_standing))
-            st.session_state.last_used_ball = st.session_state.bowling_ball
+# --- Score Sheet (current game) ---
+st.subheader(f"Score sheet — Game {st.session_state.game_number}")
+st.caption("Use the sidebar to select a game to compare.")
+render_score_sheet(df_current_game, frame_scores, total_score, max_score)
 
-            con.execute(
-                "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, is_split, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id,
-                 st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res,
-                 pins_knocked_down_str, pins_left_standing_str, split, lane_number, st.session_state.bowling_ball,
-                 arrows, breakpoint, st.session_state.ball_reaction)
-            )
-            con.commit()
+# --- Analytical Dashboard (editable grid) ---
+if st.session_state.get('save_edits_clicked'):
+    edited_data = st.session_state.get('edited_set_data')
+    if edited_data is not None and not edited_data.empty:
+        apply_edits_to_db(con, edited_data)
+        st.success("Edits saved. Score sheet and totals will update.")
+    if 'save_edits_clicked' in st.session_state:
+        del st.session_state['save_edits_clicked']
+    if 'edited_set_data' in st.session_state:
+        del st.session_state['edited_set_data']
+    st.rerun()
 
-            if st.session_state.current_frame < 10:
-                if st.session_state.current_shot == 2 or shot_res == "Strike":
-                    st.session_state.current_frame += 1
-                    st.session_state.current_shot = 1
-                    st.session_state.pins_left_after_first_shot = []
-                else:
-                    st.session_state.current_shot = 2
+st.header(f"📊 Data for Set: {st.session_state.set_name}")
+if not df_set.empty:
+    display_df = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).copy()
+    st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
+    edited_df = st.data_editor(
+        display_df,
+        key="edited_set_data",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "id": st.column_config.NumberColumn("id", disabled=True),
+            "set_id": st.column_config.TextColumn("set_id", disabled=True),
+            "set_name": st.column_config.TextColumn("set_name", disabled=True),
+            "game_id": st.column_config.TextColumn("game_id", disabled=True),
+            "game_number": st.column_config.NumberColumn("game_number", disabled=True),
+            "frame_number": st.column_config.NumberColumn("frame", disabled=False),
+            "shot_number": st.column_config.NumberColumn("shot", disabled=False),
+            "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
+        },
+    )
+    if st.button("Save edits", key="btn_save_edits"):
+        st.session_state.save_edits_clicked = True
+        st.rerun()
+else:
+    st.info("No shots submitted for this set yet.")
+
+# --- Historical Analysis result (run when requested) ---
+if st.session_state.get('run_historical_plan'):
+    st.session_state.run_historical_plan = False
+    selected_blobs = st.session_state.get('historical_sets', [])
+    goal = (st.session_state.get('historical_goal') or '').strip()
+    if not selected_blobs or not goal:
+        st.warning("Select at least one set and enter your goal.")
+        st.session_state.historical_plan_result = None
+    else:
+        with st.spinner("Downloading sets and building your game plan..."):
+            dfs = []
+            for blob_name in selected_blobs:
+                d = download_blob_to_dataframe(blob_name)
+                if d is not None and not d.empty:
+                    dfs.append(d)
+            if dfs:
+                combined = pd.concat(dfs, ignore_index=True)
+                api_key_ha = st.secrets.get("GEMINI_API_KEY")
+                model_id_ha = st.session_state.get('selected_model_id', 'gemini-2.5-flash')
+                result = get_ai_historical_game_plan(api_key_ha, combined, goal, model_id_ha)
+                st.session_state.historical_plan_result = result
             else:
-                shot1_res_df = df_current_game[
-                    (df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 1)]
-                shot1_res = shot1_res_df['shot_result'].iloc[0] if not shot1_res_df.empty else ''
-                if st.session_state.current_shot == 1:
-                    st.session_state.current_shot = 2
-                    if shot_res == "Strike": st.session_state.pins_left_after_first_shot = []
-                elif st.session_state.current_shot == 2:
-                    if shot1_res == "Strike" or shot_res == "Spare":
-                        st.session_state.current_shot = 3
-                        st.session_state.pins_left_after_first_shot = []
-                    else:
-                        st.session_state.game_over = True
-                else:
-                    st.session_state.game_over = True
+                st.session_state.historical_plan_result = None
+                st.error("Could not load any of the selected sets.")
 
-            st.session_state.pins_left_multiselect = []
-            st.session_state.ball_reaction = ""
-
-
-        st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
-
-st.header("Score Sheet")
-frame_scores, total_score, max_score = calculate_scores(df_current_game)
-score_sheet_cols = st.columns(10)
-for i in range(10):
-    with score_sheet_cols[i]:
-        box1, box2, box3 = " ", " ", " "
-        if not df_current_game.empty and 'frame_number' in df_current_game.columns:
-            frame_shots = df_current_game[df_current_game['frame_number'] == i + 1].sort_values('shot_number')
-            if not frame_shots.empty:
-                shot1 = frame_shots.iloc[0]
-                pins_left1 = get_pins_from_str(shot1.get('pins_left', ''))
-
-                if shot1.get('shot_result') == 'Strike':
-                    box1 = "X"
-                else:
-                    shot1_pins = 10 - len(pins_left1)
-                    box1 = f"S{shot1_pins}" if shot1.get('is_split') else str(shot1_pins)
-
-                    if len(frame_shots) > 1:
-                        shot2 = frame_shots.iloc[1]
-                        if shot2.get('shot_result') == 'Spare':
-                            box2 = "/"
-                        else:
-                            pins_left2 = get_pins_from_str(shot2.get('pins_left', ''))
-                            shot2_pins = len(pins_left1) - len(pins_left2)
-                            box2 = str(shot2_pins)
-
-        frame_str = f"**{i + 1}**<br>{box1} | {box2}<br>**{frame_scores[i] or ''}**"
-        st.markdown(f"<div>{frame_str}</div>", unsafe_allow_html=True)
-
-st.markdown(f"**Total Score:** {total_score} | **Max Possible:** {max_score}")
-
-st.header("Game Data")
-edited_df = st.data_editor(df_set, key="data_editor")
-if edited_df is not None:
-    # Logic to handle the edited data will go here
-    pass
+if st.session_state.get('historical_plan_result'):
+    st.header("📜 Historical game plan")
+    st.markdown(st.session_state.historical_plan_result)
+    st.divider()
 
 # --- AI Assistant ---
 st.header("🤖 AI Assistant")
@@ -824,8 +951,7 @@ else:
         if st.button("Get AI Suggestion for Next Shot"):
             if not df_set.empty:
                 with st.spinner("🤖 Calling the coach for advice..."):
-                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []),
-                                                   selected_model_id)
+                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []), selected_model_id)
                     st.markdown(suggestion)
             else:
                 st.info("Submit some shots first.")
