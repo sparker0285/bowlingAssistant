@@ -118,7 +118,6 @@ def calculate_scores(df):
 
         if frame < 10:
             if shot1.get('shot_result') == 'Strike':
-                # Look ahead for the next two shots' pinfall
                 future_shots = [s for s in shots if s['id'] > shot1['id']]
                 if len(future_shots) >= 2:
                     bonus1_pins_left = get_pins_from_str(future_shots[0].get('pins_left', ''))
@@ -163,7 +162,7 @@ def calculate_scores(df):
                     frame_score += len(get_pins_from_str(frame_shots[1].get('pins_left',''))) - len(shot3_pins_left)
 
 
-            if len(frame_shots) == 3 or (frame_shots[0].get('shot_result') != 'Strike' and len(frame_shots) == 2 and (len(frame_shots) < 2 or frame_shots[1].get('shot_result') != 'Spare')):
+            if len(frame_shots) == 3 or (shot1.get('shot_result') != 'Strike' and len(frame_shots) == 2 and (len(frame_shots) < 2 or frame_shots[1].get('shot_result') != 'Spare')):
                  is_frame_complete = True
 
 
@@ -361,7 +360,7 @@ for i in range(10):
                 shot1 = frame_shots.iloc[0]
                 pins_left1 = get_pins_from_str(shot1.get('pins_left', ''))
                 
-                if shot1['shot_result'] == 'Strike':
+                if shot1.get('shot_result') == 'Strike':
                     box1 = "X"
                 else:
                     shot1_pins = 10 - len(pins_left1)
@@ -369,7 +368,7 @@ for i in range(10):
                     
                     if len(frame_shots) > 1:
                         shot2 = frame_shots.iloc[1]
-                        if shot2['shot_result'] == 'Spare':
+                        if shot2.get('shot_result') == 'Spare':
                             box2 = "/"
                         else:
                             pins_left2 = get_pins_from_str(shot2.get('pins_left', ''))
