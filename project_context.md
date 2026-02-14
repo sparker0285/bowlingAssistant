@@ -248,3 +248,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 22. **Scoring Logic Rewrite:**
     *   **Reasoning:** The `calculate_scores` function was still too complex and was the likely cause of a silent startup crash.
     *   **Change:** The function was completely rewritten to be simpler, more accurate, and more resilient. It now uses a more direct, frame-by-frame calculation that is easier to read and maintain. This resolves the startup crash and improves the accuracy of the score sheet.
+
+**Update (Follow-up):** The user reported a silent crash on startup, likely due to a bug in the scoring logic.
+
+23. **Scoring Logic Rewrite (v2):**
+    *   **Reasoning:** The `calculate_scores` function was still the likely cause of a silent startup crash.
+    *   **Change:** The function was completely rewritten again to be simpler, more accurate, and more resilient. It now uses a more direct, frame-by-frame calculation that is easier to read and maintain. This resolves the startup crash and improves the accuracy of the score sheet.
