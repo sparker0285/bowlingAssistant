@@ -18,7 +18,9 @@ PIN_NEIGHBORS = {
 
 # --- AI Logic ---
 def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
-    """Analyzes game data from a set and provides a suggestion for the next shot."""
+    """
+    Analyzes game data from a set and provides a suggestion for the next shot.
+    """
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
@@ -184,19 +186,20 @@ def calculate_scores(df):
         is_frame_complete = False
 
         shot1 = frame_shots[0]
-        shot1_pins_knocked = 10 - len(get_pins_from_str(shot1.get('pins_left')))
+        shot1_pins_left = get_pins_from_str(shot1.get('pins_left', ''))
+        shot1_pins_knocked = 10 - len(shot1_pins_left)
 
         if i < 10:
             if shot1.get('shot_result') == 'Strike':
                 future_shots = [s for s in shots if s['id'] > shot1['id']]
                 if len(future_shots) >= 2:
-                    bonus1 = 10 - len(get_pins_from_str(future_shots[0].get('pins_left')))
-                    bonus2 = 0
+                    bonus1_pins_left = get_pins_from_str(future_shots[0].get('pins_left', ''))
+                    bonus1 = 10 - len(bonus1_pins_left)
+
                     if future_shots[0].get('shot_result') == 'Strike':
-                        bonus2 = 10 - len(get_pins_from_str(future_shots[1].get('pins_left')))
+                        bonus2 = 10 - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
                     else:
-                        bonus2 = len(get_pins_from_str(future_shots[0].get('pins_left'))) - len(
-                            get_pins_from_str(future_shots[1].get('pins_left')))
+                        bonus2 = len(bonus1_pins_left) - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
                     frame_score = 10 + bonus1 + bonus2
                     is_frame_complete = True
             else:  # Leave
@@ -228,7 +231,7 @@ def calculate_scores(df):
                 if shot2.get('shot_result') == 'Strike' or shot2.get('shot_result') == 'Spare':
                     frame_score += 10 - len(get_pins_from_str(shot3.get('pins_left')))
                 else:
-                    frame_score += len(get_pins_from_str(shot2.get('pins_left'))) - len(
+                    frame_score += len(get_pins_from_str(shot2.get('pins_left', ''))) - len(
                         get_pins_from_str(shot3.get('pins_left')))
 
             if shot1.get('shot_result') == 'Strike':
@@ -609,7 +612,6 @@ if st.sidebar.button("Start New Game in Set"):
     st.session_state.current_shot = 1
     st.session_state.game_over = False
 
-    # Alternate starting lane for new games
     if len(df_set['game_number'].unique()) > 0:
         last_game_start_lane = con.execute(
             "SELECT starting_lane FROM shots WHERE set_id = ? AND game_number = ? AND frame_number = 1 AND shot_number = 1",
@@ -774,17 +776,43 @@ if 'new_set_prompt' not in st.session_state or not st.session_state.new_set_prom
 
         st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
 
-# --- Analytical Dashboard ---
-st.header(f"📊 Data for Set: {st.session_state.set_name}")
-if not df_set.empty:
-    st.data_editor(
-        df_set,
-        key="data_editor",
-        disabled=["id", "set_id", "game_id", "game_number", "frame_number", "shot_number", "shot_result",
-                  "shot_timestamp"]
-    )
-else:
-    st.info("No shots submitted for this set yet.")
+st.header("Score Sheet")
+frame_scores, total_score, max_score = calculate_scores(df_current_game)
+score_sheet_cols = st.columns(10)
+for i in range(10):
+    with score_sheet_cols[i]:
+        box1, box2, box3 = " ", " ", " "
+        if not df_current_game.empty and 'frame_number' in df_current_game.columns:
+            frame_shots = df_current_game[df_current_game['frame_number'] == i + 1].sort_values('shot_number')
+            if not frame_shots.empty:
+                shot1 = frame_shots.iloc[0]
+                pins_left1 = get_pins_from_str(shot1.get('pins_left', ''))
+
+                if shot1.get('shot_result') == 'Strike':
+                    box1 = "X"
+                else:
+                    shot1_pins = 10 - len(pins_left1)
+                    box1 = f"S{shot1_pins}" if shot1.get('is_split') else str(shot1_pins)
+
+                    if len(frame_shots) > 1:
+                        shot2 = frame_shots.iloc[1]
+                        if shot2.get('shot_result') == 'Spare':
+                            box2 = "/"
+                        else:
+                            pins_left2 = get_pins_from_str(shot2.get('pins_left', ''))
+                            shot2_pins = len(pins_left1) - len(pins_left2)
+                            box2 = str(shot2_pins)
+
+        frame_str = f"**{i + 1}**<br>{box1} | {box2}<br>**{frame_scores[i] or ''}**"
+        st.markdown(f"<div>{frame_str}</div>", unsafe_allow_html=True)
+
+st.markdown(f"**Total Score:** {total_score} | **Max Possible:** {max_score}")
+
+st.header("Game Data")
+edited_df = st.data_editor(df_set, key="data_editor")
+if edited_df is not None:
+    # Logic to handle the edited data will go here
+    pass
 
 # --- AI Assistant ---
 st.header("🤖 AI Assistant")
@@ -806,4 +834,3 @@ else:
             with st.spinner("🤖 Analyzing your game..."):
                 analysis = get_ai_analysis(api_key, df_current_game, selected_model_id)
                 st.markdown(analysis)
-< ctrl46 >}
