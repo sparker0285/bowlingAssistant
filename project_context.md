@@ -242,3 +242,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 21. **Empty State Handling:**
     *   **Reasoning:** The score sheet rendering logic did not correctly handle the case where a new game has no shots, causing a `KeyError` when trying to access a non-existent dataframe column.
     *   **Change:** A guard clause was added to the score sheet rendering logic. It now checks if the `df_current_game` dataframe is empty and, if so, renders a clean, empty score sheet instead of trying to process non-existent data.
+
+**Update (Follow-up):** The user reported a silent crash on startup, likely due to a bug in the scoring logic.
+
+22. **Scoring Logic Rewrite:**
+    *   **Reasoning:** The `calculate_scores` function was still too complex and was the likely cause of a silent startup crash.
+    *   **Change:** The function was completely rewritten to be simpler, more accurate, and more resilient. It now uses a more direct, frame-by-frame calculation that is easier to read and maintain. This resolves the startup crash and improves the accuracy of the score sheet.

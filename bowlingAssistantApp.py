@@ -100,67 +100,72 @@ def calculate_scores(df):
         return [None] * 10, 0, 300
 
     shots = df.sort_values(by='id').to_dict('records')
-    
-    # Pre-calculate pins knocked down for each shot
-    pins_knocked_down = []
-    for i, s in enumerate(shots):
-        if s['shot_result'] == 'Strike':
-            pins_knocked_down.append(10)
-        elif s['shot_result'] == 'Spare':
-            # Find the first shot of the frame to see what was left
-            shot1 = next((sh for sh in shots[:i] if sh['frame_number'] == s['frame_number'] and sh['shot_number'] == 1), None)
-            if shot1:
-                pins_knocked_down.append(len(get_pins_from_str(shot1.get('pins_left'))))
-            else: # Should not happen
-                pins_knocked_down.append(0)
-        else: # Open frame
-            if s['shot_number'] == 1:
-                pins_knocked_down.append(10 - len(get_pins_from_str(s.get('pins_left'))))
-            else:
-                shot1 = next((sh for sh in shots[:i] if sh['frame_number'] == s['frame_number'] and sh['shot_number'] == 1), None)
-                if shot1:
-                    pins_knocked_down.append(len(get_pins_from_str(shot1.get('pins_left'))) - len(get_pins_from_str(s.get('pins_left'))))
-                else: # Should not happen
-                    pins_knocked_down.append(0)
-
-
     frame_scores = [None] * 10
     total_score = 0
     shot_cursor = 0
 
     for frame in range(1, 11):
-        frame_shots = [s for s in shots if s['frame_number'] == frame]
+        frame_shots = [s for s in shots if s.get('frame_number') == frame]
         if not frame_shots:
             break
 
-        is_frame_complete = False
+        shot1 = frame_shots[0]
+        shot1_pins_left = get_pins_from_str(shot1.get('pins_left', ''))
+        shot1_pins_knocked = 10 - len(shot1_pins_left)
+
         frame_score = 0
-        
+        is_frame_complete = False
+
         if frame < 10:
-            if frame_shots[0]['shot_result'] == 'Strike':
-                if shot_cursor + 2 < len(pins_knocked_down):
-                    frame_score = 10 + pins_knocked_down[shot_cursor + 1] + pins_knocked_down[shot_cursor + 2]
+            if shot1.get('shot_result') == 'Strike':
+                # Look ahead for the next two shots' pinfall
+                future_shots = [s for s in shots if s['id'] > shot1['id']]
+                if len(future_shots) >= 2:
+                    bonus1_pins_left = get_pins_from_str(future_shots[0].get('pins_left', ''))
+                    bonus1 = 10 - len(bonus1_pins_left)
+                    
+                    if future_shots[0].get('shot_result') == 'Strike':
+                        bonus2 = 10 - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
+                    else:
+                        bonus2 = len(bonus1_pins_left) - len(get_pins_from_str(future_shots[1].get('pins_left', '')))
+                    frame_score = 10 + bonus1 + bonus2
                     is_frame_complete = True
-                shot_cursor += 1
-            else: # Leave
+            else: # Not a strike
                 if len(frame_shots) > 1:
-                    if frame_shots[1]['shot_result'] == 'Spare':
-                        if shot_cursor + 2 < len(pins_knocked_down):
-                            frame_score = 10 + pins_knocked_down[shot_cursor + 2]
+                    shot2 = frame_shots[1]
+                    if shot2.get('shot_result') == 'Spare':
+                        future_shots = [s for s in shots if s['id'] > shot2['id']]
+                        if len(future_shots) >= 1:
+                            bonus = 10 - len(get_pins_from_str(future_shots[0].get('pins_left', '')))
+                            frame_score = 10 + bonus
                             is_frame_complete = True
-                    else: # Open
-                        frame_score = pins_knocked_down[shot_cursor] + pins_knocked_down[shot_cursor + 1]
+                    else: # Open frame
+                        shot2_pins_left = get_pins_from_str(shot2.get('pins_left', ''))
+                        shot2_pins_knocked = len(shot1_pins_left) - len(shot2_pins_left)
+                        frame_score = shot1_pins_knocked + shot2_pins_knocked
                         is_frame_complete = True
-                    shot_cursor += 2
         else: # 10th Frame
-            frame_score = sum(pins_knocked_down[shot_cursor:])
+            frame_score = shot1_pins_knocked
+            if len(frame_shots) > 1:
+                shot2 = frame_shots[1]
+                shot2_pins_left = get_pins_from_str(shot2.get('pins_left', ''))
+                if shot1.get('shot_result') == 'Strike':
+                    frame_score += 10 - len(shot2_pins_left)
+                else:
+                    frame_score += len(shot1_pins_left) - len(shot2_pins_left)
             
-            if frame_shots[0]['shot_result'] == 'Strike':
-                if len(frame_shots) == 3: is_frame_complete = True
-            elif len(frame_shots) > 1 and frame_shots[1]['shot_result'] == 'Spare':
-                if len(frame_shots) == 3: is_frame_complete = True
-            elif len(frame_shots) == 2:
-                is_frame_complete = True
+            if len(frame_shots) > 2:
+                shot3 = frame_shots[2]
+                shot3_pins_left = get_pins_from_str(shot3.get('pins_left', ''))
+                if shot_is_fill_ball(frame_shots):
+                    frame_score += 10 - len(shot3_pins_left)
+                else:
+                    frame_score += len(get_pins_from_str(frame_shots[1].get('pins_left',''))) - len(shot3_pins_left)
+
+
+            if len(frame_shots) == 3 or (frame_shots[0].get('shot_result') != 'Strike' and len(frame_shots) == 2 and (len(frame_shots) < 2 or frame_shots[1].get('shot_result') != 'Spare')):
+                 is_frame_complete = True
+
 
         if is_frame_complete:
             total_score += frame_score
@@ -168,11 +173,15 @@ def calculate_scores(df):
             
     return frame_scores, total_score, 300
 
+def shot_is_fill_ball(frame10_shots):
+    if len(frame10_shots) < 3: return False
+    return frame10_shots[0].get('shot_result') == 'Strike' or frame10_shots[1].get('shot_result') == 'Spare'
+
 # --- Main App ---
 st.set_page_config(layout="wide")
 st.title("🎳 PinDeck: Bowling Assistant")
 
-# ... (Azure functions and state management functions remain the same)
+# ... (The rest of the app logic remains the same)
 def get_azure_client():
     try:
         container_name = st.secrets.get("AZURE_STORAGE_CONTAINER_NAME")
@@ -346,7 +355,7 @@ score_sheet_cols = st.columns(10)
 for i in range(10):
     with score_sheet_cols[i]:
         box1, box2, box3 = " ", " ", " "
-        if not df_current_game.empty:
+        if not df_current_game.empty and 'frame_number' in df_current_game.columns:
             frame_shots = df_current_game[df_current_game['frame_number'] == i + 1].sort_values('shot_number')
             if not frame_shots.empty:
                 shot1 = frame_shots.iloc[0]
