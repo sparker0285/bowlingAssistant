@@ -10,13 +10,13 @@ import pandas as pd
 import google.generativeai as genai
 
 # --- AI Logic ---
-def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
+def get_ai_suggestion(api_key, df_set, balls_in_bag):
     """
     Analyzes game data from a set and provides a suggestion for the next shot.
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name)
+        model = genai.GenerativeModel('models/gemini-flash-latest')
         df_set = df_set.sort_values(by=['game_number', 'id'])
         data_summary = df_set.to_string()
         in_bag_summary = ", ".join(balls_in_bag)
@@ -43,13 +43,13 @@ def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
     except Exception as e:
         return f"An error occurred while getting a suggestion: {e}"
 
-def get_ai_analysis(api_key, df_game, model_name):
+def get_ai_analysis(api_key, df_game):
     """
     Performs a post-game analysis and provides practice recommendations.
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name)
+        model = genai.GenerativeModel('models/gemini-flash-latest')
         data_summary = df_game.to_string()
 
         prompt = f"""
@@ -100,7 +100,6 @@ con.execute("""
     );
 """)
 
-# Pre-populate the arsenal if it's empty
 if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
     default_balls = [
         "Storm Phaze II - Pin Down", "Storm IQ Tour - Pin Down", "Roto Grip Attention Star - Pin Up",
@@ -272,8 +271,8 @@ def download_and_load_set(blob_name):
             st.error("Downloaded file is not a valid set file.")
             return
 
-        set_id_to_load = df['set_id'].iloc[0]
-        con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
+        # Wipe all local data before importing
+        con.execute("DELETE FROM shots")
         
         con.register('df_to_insert', df)
         con.execute('INSERT INTO shots SELECT * FROM df_to_insert')
@@ -281,8 +280,7 @@ def download_and_load_set(blob_name):
         con.commit()
 
         st.success(f"Successfully loaded set '{df['set_name'].iloc[0]}'.")
-        st.session_state.set_id = set_id_to_load
-        st.session_state.state_restored = False
+        st.session_state.clear() # Clear all session state
         st.rerun()
 
     except Exception as e:
@@ -428,6 +426,27 @@ if st.sidebar.button("Rename Set"):
         st.session_state.set_name = new_name
         st.rerun()
 
+with st.sidebar.expander("☁️ Azure Cloud Storage"):
+    st.markdown("**Save your current set as a backup or load a previous one.**")
+    if st.button("Save Current Set to Azure"):
+        upload_set_to_azure(con, st.session_state.set_id)
+    
+    azure_client = get_azure_client()
+    if azure_client:
+        try:
+            container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
+            container_client = azure_client.get_container_client(container_name)
+            blob_list = [b.name for b in container_client.list_blobs() if b.name.startswith('set-')]
+            if blob_list:
+                selected_blob = st.selectbox("Load Set from Azure", options=blob_list)
+                st.warning("Loading a set will overwrite all local data.")
+                if st.button("Download and Load Set"):
+                    download_and_load_set(selected_blob)
+            else:
+                st.write("No sets found in Azure.")
+        except Exception as e:
+            st.error(f"Could not list Azure blobs: {e}")
+
 with st.sidebar.expander("🎳 Manage Arsenal"):
     st.markdown("**Your Full Arsenal**")
     arsenal = [row[0] for row in con.execute("SELECT ball_name FROM arsenal ORDER BY ball_name").fetchall()]
@@ -453,33 +472,6 @@ with st.sidebar.expander("🎳 Manage Arsenal"):
             st.warning("Please enter a ball name.")
         else:
             st.warning(f"'{new_ball_name}' is already in your arsenal.")
-
-with st.sidebar.expander("☁️ Azure Cloud Storage"):
-    if st.button("Save Current Set to Azure"):
-        upload_set_to_azure(con, st.session_state.set_id)
-    
-    azure_client = get_azure_client()
-    if azure_client:
-        try:
-            container_name = st.secrets["AZURE_STORAGE_CONTAINER_NAME"]
-            container_client = azure_client.get_container_client(container_name)
-            blob_list = [b.name for b in container_client.list_blobs() if b.name.startswith('set-')]
-            if blob_list:
-                selected_blob = st.selectbox("Load Set from Azure", options=blob_list)
-                if st.button("Download and Load Set"):
-                    download_and_load_set(selected_blob)
-            else:
-                st.write("No sets found in Azure.")
-        except Exception as e:
-            st.error(f"Could not list Azure blobs: {e}")
-
-with st.sidebar.expander("🤖 AI Settings"):
-    model_options = {
-        "Gemini 2.5 Flash (Recommended)": "gemini-2.5-flash",
-        "Gemini 1.5 Flash (Economical)": "gemini-1.5-flash"
-    }
-    selected_model_label = st.selectbox("Select AI Model", options=list(model_options.keys()))
-    selected_model_id = model_options[selected_model_label]
 
 with st.sidebar.expander("⚠️ Danger Zone"):
     if st.button("Delete Current Set"):
@@ -561,7 +553,6 @@ else:
         lane_number = st.session_state.starting_lane if is_odd_frame else ("Right Lane" if starts_on_left else "Left Lane")
         st.markdown(f"**Current Lane:** {lane_number}")
 
-    # Ball Selection
     balls_in_bag = st.session_state.get('balls_in_bag', [])
     last_used_ball = st.session_state.get('last_used_ball')
     default_index = 0
@@ -679,12 +670,12 @@ else:
         if st.button("Get AI Suggestion for Next Shot"):
             if not df_set.empty:
                 with st.spinner("🤖 Calling the coach for advice..."):
-                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []), selected_model_id)
+                    suggestion = get_ai_suggestion(api_key, df_set, st.session_state.get('balls_in_bag', []))
                     st.markdown(suggestion)
             else:
                 st.info("Submit some shots first.")
     if not df_current_game.empty:
         if st.button("Get AI Post-Game Analysis"):
             with st.spinner("🤖 Analyzing your game..."):
-                analysis = get_ai_analysis(api_key, df_current_game, selected_model_id)
+                analysis = get_ai_analysis(api_key, df_current_game)
                 st.markdown(analysis)

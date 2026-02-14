@@ -216,3 +216,11 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The main "Bowling Ball" dropdown in the shot entry form is now filtered to only show the balls selected as being "in the bag."
     *   **Change:** The application now remembers the last used ball and defaults to it in the dropdown, saving a click on each shot.
     *   **Change:** The AI Assistant is now only provided with the list of balls currently in the bag, ensuring its recommendations are relevant to the user's available equipment.
+
+**Update (Follow-up):** The user reported that the application was crashing due to a DuckDB error, likely caused by the app being suspended and restarted by the mobile OS.
+
+18. **Resilient Data Workflow:**
+    *   **Reasoning:** The application was not resilient to being suspended and restarted by the mobile OS, leading to database corruption and crashes.
+    *   **Change:** The data workflow was redesigned to treat Azure as the single source of truth. The local DuckDB is now treated as a temporary workspace for the current set only.
+    *   **Change:** The "Load Set from Azure" function was updated to completely wipe the local database before importing the downloaded data, ensuring a clean and reliable restore.
+    *   **Change:** The UI was updated to include clearer text explaining that loading a set from Azure will overwrite any unsaved local changes.
