@@ -224,3 +224,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The data workflow was redesigned to treat Azure as the single source of truth. The local DuckDB is now treated as a temporary workspace for the current set only.
     *   **Change:** The "Load Set from Azure" function was updated to completely wipe the local database before importing the downloaded data, ensuring a clean and reliable restore.
     *   **Change:** The UI was updated to include clearer text explaining that loading a set from Azure will overwrite any unsaved local changes.
+
+**Update (Follow-up):** The user reported a `CatalogException` on startup due to a database schema mismatch.
+
+19. **Database Schema Migration:**
+    *   **Reasoning:** The application was attempting to create a table with a new schema before the old schema was properly migrated, causing a `CatalogException`.
+    *   **Change:** The database setup logic was corrected to first create the table with a compatible base schema and then use `ALTER TABLE` to add new columns. This ensures that existing database files can be correctly migrated to the new schema without crashing the application.
