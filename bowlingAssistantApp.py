@@ -49,32 +49,35 @@ def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
     except Exception as e:
         return f"An error occurred while getting a suggestion: {e}"
 
-def get_ai_analysis(api_key, df_game, model_name):
-    """
-    Performs a post-game analysis and provides practice recommendations.
-    """
+def get_ai_game_plan(api_key, df_sets, user_goal, model_name):
+    """Analyzes multiple sets and provides a strategic game plan."""
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
-        data_summary = df_game.to_string()
+        data_summary = df_sets.to_string()
 
         prompt = f"""
-        You are an expert bowling coach. Your task is to analyze a completed bowling game and provide practice recommendations.
-
-        Analyze the following game data:
+        You are an expert bowling coach reviewing a bowler's history to create a game plan.
+        Analyze the following data, which represents several past sessions:
         {data_summary}
 
-        YOUR TASK:
-        1.  **Identify Strengths:** What did the bowler do well in this game?
-        2.  **Identify Weaknesses:** What was the biggest struggle?
-        3.  **Provide Actionable Practice Tips:** Based on the weaknesses, suggest 1-2 specific things to work on.
+        The bowler's goal for tonight is: "{user_goal}"
 
-        Provide a concise, easy-to-read analysis.
+        YOUR TASK:
+        1.  **Identify High-Level Trends:** What are the bowler's consistent strengths and weaknesses across all these sets? (e.g., "You consistently have a higher strike percentage on the left lane," or "You struggle with 10-pin spares in later games.")
+        2.  **Analyze Equipment Performance:** Which bowling balls tend to perform best? Are there patterns where a ball works well early but struggles later?
+        3.  **Create a Strategic Game Plan:** Based on the data and the bowler's goal, provide a clear, actionable game plan for their next session. This should include:
+            *   A recommended starting ball and a target on the lane.
+            *   Key things to watch for (e.g., "If you start leaving 4-pins, that's your cue to...").
+            *   Specific adjustments to make if those cues appear (e.g., "...move 2 boards left with your feet.").
+            *   A recommendation for when to consider a ball change and which ball to switch to.
+
+        Provide a concise, strategic plan.
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"An error occurred while getting analysis: {e}"
+        return f"An error occurred during analysis: {e}"
 
 
 # --- Database Setup ---
@@ -85,6 +88,7 @@ con.execute("""
         id INTEGER PRIMARY KEY DEFAULT nextval('seq_shots_id'),
         set_id VARCHAR,
         set_name VARCHAR,
+        bowling_center VARCHAR,
         game_id VARCHAR,
         game_number INTEGER,
         frame_number INTEGER,
@@ -92,6 +96,7 @@ con.execute("""
         shot_result VARCHAR,
         pins_knocked_down VARCHAR,
         pins_left VARCHAR,
+        is_split BOOLEAN,
         lane_number VARCHAR,
         bowling_ball VARCHAR,
         arrows_pos INTEGER,
@@ -100,13 +105,21 @@ con.execute("""
         shot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 """)
-con.execute("""
-    CREATE TABLE IF NOT EXISTS arsenal (
-        ball_name VARCHAR PRIMARY KEY
-    );
-""")
+con.execute("CREATE TABLE IF NOT EXISTS arsenal (ball_name VARCHAR PRIMARY KEY);")
 
-# Pre-populate the arsenal if it's empty
+# Backwards compatibility
+schema_migrations = {
+    'bowling_ball': 'VARCHAR',
+    'bowling_center': 'VARCHAR',
+    'is_split': 'BOOLEAN'
+}
+for col, col_type in schema_migrations.items():
+    try:
+        con.execute(f"ALTER TABLE shots ADD COLUMN {col} {col_type};")
+        con.commit()
+    except duckdb.Error:
+        pass
+
 if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
     default_balls = [
         "Storm Phaze II - Pin Down", "Storm IQ Tour - Pin Down", "Roto Grip Attention Star - Pin Up",
@@ -116,13 +129,30 @@ if con.execute("SELECT COUNT(*) FROM arsenal").fetchone()[0] == 0:
         con.execute("INSERT INTO arsenal (ball_name) VALUES (?)", (ball,))
     con.commit()
 
-try:
-    con.execute("ALTER TABLE shots ADD COLUMN bowling_ball VARCHAR;")
-    con.commit()
-except duckdb.Error:
-    pass
+# --- Scoring & Game Logic ---
+def is_split(pins_left):
+    if not pins_left or 1 in pins_left or len(pins_left) <= 1:
+        return False
+    
+    pins_left.sort()
+    for i in range(len(pins_left) - 1):
+        if pins_left[i+1] not in PIN_NEIGHBORS.get(pins_left[i], set()):
+            q = [pins_left[i]]
+            visited = {pins_left[i]}
+            found_path = False
+            while q:
+                curr = q.pop(0)
+                if curr == pins_left[i+1]:
+                    found_path = True
+                    break
+                for neighbor in PIN_NEIGHBORS.get(curr, set()):
+                    if neighbor in pins_left and neighbor not in visited:
+                        visited.add(neighbor)
+                        q.append(neighbor)
+            if not found_path:
+                return True
+    return False
 
-# --- Scoring Logic ---
 def get_pins_from_str(pins_str):
     if not pins_str or pins_str == "N/A": return []
     return [int(p.strip()) for p in pins_str.split(',')]
@@ -239,8 +269,7 @@ def download_and_load_set(blob_name):
             st.error("Downloaded file is not a valid set file.")
             return
 
-        set_id_to_load = df['set_id'].iloc[0]
-        con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
+        con.execute("DELETE FROM shots")
         
         con.register('df_to_insert', df)
         con.execute('INSERT INTO shots SELECT * FROM df_to_insert')
@@ -248,8 +277,7 @@ def download_and_load_set(blob_name):
         con.commit()
 
         st.success(f"Successfully loaded set '{df['set_name'].iloc[0]}'.")
-        st.session_state.set_id = set_id_to_load
-        st.session_state.state_restored = False
+        st.session_state.clear()
         st.rerun()
 
     except Exception as e:
@@ -258,12 +286,13 @@ def download_and_load_set(blob_name):
 
 # --- Main Application ---
 st.set_page_config(layout="wide")
-st.title("🎳 PinDeck: Bowling Set Tracker")
+st.title("🎳 PinDeck: Bowling Assistant")
 
-def initialize_set(set_id=None, set_name=None):
+def initialize_set(set_id=None, set_name=None, center_name=None):
     if set_id is None:
         st.session_state.set_id = f"set-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         st.session_state.set_name = set_name or f"League {datetime.datetime.now().strftime('%m-%d-%y')}"
+        st.session_state.bowling_center = center_name or ""
         st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         st.session_state.game_number = 1
         st.session_state.current_frame = 1
@@ -275,9 +304,9 @@ def initialize_set(set_id=None, set_name=None):
         st.session_state.set_id = set_id
         st.session_state.set_name = set_name
         
-        latest_game = con.execute("SELECT game_id, game_number FROM shots WHERE set_id = ? ORDER BY game_number DESC, id DESC LIMIT 1", [set_id]).fetchone()
+        latest_game = con.execute("SELECT game_id, game_number, bowling_center FROM shots WHERE set_id = ? ORDER BY game_number DESC, id DESC LIMIT 1", [set_id]).fetchone()
         if latest_game:
-            st.session_state.game_id, st.session_state.game_number = latest_game
+            st.session_state.game_id, st.session_state.game_number, st.session_state.bowling_center = latest_game
             restore_game_state()
         else:
             st.session_state.game_id = f"game-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"

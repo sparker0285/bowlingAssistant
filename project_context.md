@@ -261,3 +261,33 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** The application was not loading because the UI code for the shot entry section had been accidentally deleted in a previous step.
     *   **Change:** The UI components for the shot entry form were restored from a backup.
     *   **Change:** The `calculate_scores` function was replaced with a new, simpler version to prevent the original silent crash.
+---
+## Session from Tuesday, February 10, 2026
+
+**User Story:** The user came with a comprehensive plan to enhance the application's features and fix several outstanding bugs.
+1.  **Historical Analysis:** The user wants a feature to analyze performance across multiple sets to get strategic advice.
+2.  **Bowling Center Tracking:** The user wants to associate a bowling center with each set and have it included in the saved filename.
+3.  **Lane Switching Bug:** The lane switching logic was still incorrect, particularly when starting a new game in a set.
+4.  **Scoring Accuracy:** The scoring was not correct, especially for the 10th frame.
+5.  **New Score Sheet UI:** The user requested a visual score sheet to be displayed on the main screen.
+6.  **Automatic Split Detection:** The user wants the app to automatically detect and display splits on the score sheet.
+7.  **Editable Data:** The user wants to be able to edit shot data after it has been entered.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1.  **Full Feature Implementation:**
+    *   **Reasoning:** Multiple features and bug fixes were requested in a single, comprehensive plan.
+    *   **Change:** Added a text input for "Bowling Center" when creating a new set.
+    *   **Change:** Corrected the lane switching logic to properly alternate between frames and for subsequent games in a set.
+    *   **Change:** Implemented a new `is_split` function for automatic split detection based on the pins left standing.
+    *   **Change:** Completely refactored the `calculate_scores` function to accurately calculate scores according to standard bowling rules, including complex 10th-frame scenarios.
+    *   **Change:** Added a new visual score sheet to the main UI that displays frame-by-frame results with traditional bowling symbols.
+    *   **Change:** Implemented an editable data grid using `st.data_editor` to allow for post-entry corrections of shot data.
+    *   **Change:** Added a new "Historical Analysis" section to the sidebar, allowing users to select multiple sets from Azure and enter a custom goal for the AI to analyze.
+
+**Update (Follow-up):** The user reported a series of startup crashes after the new features were implemented.
+
+2.  **Startup Crash and UI Restoration:**
+    *   **Reasoning:** In the process of fixing a `CatalogException` and subsequent silent crashes related to the new scoring logic, the main UI components were accidentally deleted from the application file, resulting in a blank screen.
+    *   **Change:** The application code was restored from a known good backup (`bowlingAssistantApp-commit_7ce08e7.py`).
+    *   **Change:** The new, correct `calculate_scores` function was carefully re-integrated into the restored code, and all other new features (bowling center, split detection, score sheet, editable grid, etc.) were verified to be present. This resolved the startup crashes and restored all application functionality.
