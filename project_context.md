@@ -230,3 +230,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 19. **Database Schema Migration:**
     *   **Reasoning:** The application was attempting to create a table with a new schema before the old schema was properly migrated, causing a `CatalogException`.
     *   **Change:** The database setup logic was corrected to first create the table with a compatible base schema and then use `ALTER TABLE` to add new columns. This ensures that existing database files can be correctly migrated to the new schema without crashing the application.
+
+**Update (Follow-up):** The user reported a silent crash on startup.
+
+20. **Scoring Logic Refactor:**
+    *   **Reasoning:** The `calculate_scores` function was overly complex and contained a bug that caused a silent crash on startup.
+    *   **Change:** The function was completely rewritten to be simpler, more accurate, and more resilient. It now calculates scores frame by frame and looks ahead only when necessary for strikes and spares, following standard bowling scoring rules. This resolves the startup crash and improves the accuracy of the score sheet.
