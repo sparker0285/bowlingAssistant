@@ -755,9 +755,36 @@ with st.sidebar.expander("⚠️ Danger Zone"):
         initialize_set()
         st.rerun()
 
+# --- Save Edits (run before refetch so next run sees updated data) ---
+if st.session_state.get('save_edits_clicked'):
+    edited_data = st.session_state.get('edited_set_data')
+    did_save = False
+    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty:
+        apply_edits_to_db(con, edited_data)
+        did_save = True
+    elif edited_data is not None and not isinstance(edited_data, pd.DataFrame):
+        try:
+            df_edit = pd.DataFrame(edited_data)
+            if not df_edit.empty:
+                apply_edits_to_db(con, df_edit)
+                did_save = True
+        except Exception:
+            pass
+    if 'save_edits_clicked' in st.session_state:
+        del st.session_state['save_edits_clicked']
+    if 'edited_set_data' in st.session_state:
+        del st.session_state['edited_set_data']
+    if did_save:
+        st.session_state.edits_saved_message = True
+    st.rerun()
+
 # --- Game Selection & Data Fetching ---
 st.sidebar.header("Game Management")
 df_set = con.execute("SELECT * FROM shots WHERE set_id = ?", [st.session_state.set_id]).fetchdf()
+
+if st.session_state.get('edits_saved_message'):
+    st.success("Edits saved. Score sheet and totals updated.")
+    del st.session_state['edits_saved_message']
 
 games_in_set = df_set['game_number'].unique()
 games_in_set.sort()
@@ -949,25 +976,6 @@ st.caption("Use the sidebar to select a game to compare.")
 render_score_sheet(df_current_game, frame_scores, total_score, max_score)
 
 # --- Analytical Dashboard (editable grid) ---
-if st.session_state.get('save_edits_clicked'):
-    edited_data = st.session_state.get('edited_set_data')
-    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty:
-        apply_edits_to_db(con, edited_data)
-        st.success("Edits saved. Score sheet and totals will update.")
-    elif edited_data is not None and not isinstance(edited_data, pd.DataFrame):
-        try:
-            df_edit = pd.DataFrame(edited_data)
-            if not df_edit.empty:
-                apply_edits_to_db(con, df_edit)
-                st.success("Edits saved. Score sheet and totals will update.")
-        except Exception:
-            st.warning("Could not save edits; please try again.")
-    if 'save_edits_clicked' in st.session_state:
-        del st.session_state['save_edits_clicked']
-    if 'edited_set_data' in st.session_state:
-        del st.session_state['edited_set_data']
-    st.rerun()
-
 st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
     display_df = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).copy()
