@@ -337,3 +337,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 8. **Save Edits so score sheet and totals refresh:**
     *   **Reasoning:** Save-edits logic ran after `df_set` was already fetched, so after rerun the script re-fetched `df_set` but the run that performed the save had already built sidebar and score data from the old fetch. Ensuring the save runs before any fetch guarantees the next run gets updated data.
     *   **Change:** The save-edits block was moved to run **before** "Game Selection & Data Fetching" (before `df_set = con.execute(...)`). When the user clicks Save Edits, the app applies edits, sets a session flag for the success message, and reruns; on the next run the save block is skipped, `df_set` is fetched (now with updated shots), and `calculate_scores(df_current_game)` and the score sheet use the new data. A one-time success message ("Edits saved. Score sheet and totals updated.") is shown via `st.session_state.edits_saved_message` on the run after save.
+
+**Update (Follow-up):** User reported that splits such as 3,10 (Baby Split) and 7,10 (Bedposts) were not being recognized.
+
+9. **Split recognition fixes:**
+    *   **Reasoning:** Splits were not matching due to possible pin type mismatch (int vs string) and/or splits.json not being found (e.g. different working directory on Streamlit Cloud).
+    *   **Change:** Added `_normalize_pins_list(pins_left_list)` to convert all pin values to integers 1–10 so that both multiselect lists (e.g. `[3, 10]`) and string inputs (e.g. `["3", "10"]`) match the JSON keys. Cache keys when loading splits.json are built with `tuple(sorted(int(p) for p in entry["pins"]))` for consistency. `_load_splits()` now tries multiple base directories: script directory, current working directory, and parent of script directory, and only loads from a path where `splits.json` exists, so the file is found in more deployment layouts.

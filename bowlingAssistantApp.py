@@ -16,25 +16,46 @@ def _load_splits():
     global _SPLITS_CACHE
     if _SPLITS_CACHE is not None:
         return _SPLITS_CACHE
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(script_dir, "splits.json")
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # Map sorted tuple of pins -> name (first match wins)
-        _SPLITS_CACHE = {tuple(sorted(entry["pins"])): entry["name"] for entry in data}
-        return _SPLITS_CACHE
-    except Exception:
-        _SPLITS_CACHE = {}
-        return _SPLITS_CACHE
+    for base_dir in [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.getcwd(),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
+    ]:
+        try:
+            path = os.path.join(base_dir, "splits.json")
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _SPLITS_CACHE = {
+                    tuple(sorted(int(p) for p in entry["pins"])): entry["name"]
+                    for entry in data
+                }
+                return _SPLITS_CACHE
+        except Exception:
+            continue
+    _SPLITS_CACHE = {}
+    return _SPLITS_CACHE
+
+def _normalize_pins_list(pins_left_list):
+    """Convert to list of ints 1-10; return [] if invalid or headpin (1) present."""
+    if not pins_left_list:
+        return []
+    out = []
+    for p in pins_left_list:
+        try:
+            v = int(p) if not isinstance(p, int) else p
+            if 1 <= v <= 10:
+                out.append(v)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 def get_split_name(pins_left_list):
     """If pins_left (standing) matches a known split in splits.json, return its name; else None."""
-    if not pins_left_list or 1 in pins_left_list:
+    pins = _normalize_pins_list(pins_left_list)
+    if len(pins) < 2 or 1 in pins:
         return None
-    key = tuple(sorted([p for p in pins_left_list if 1 <= p <= 10]))
-    if len(key) < 2:
-        return None
+    key = tuple(sorted(pins))
     return _load_splits().get(key)
 
 # --- AI Logic ---
