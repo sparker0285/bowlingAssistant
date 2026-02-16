@@ -4,10 +4,38 @@ from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
 import datetime
 import io
+import json
 import os
 import re
 import pandas as pd
 import google.generativeai as genai
+
+# Load splits from same folder as this script (splits.json)
+_SPLITS_CACHE = None
+def _load_splits():
+    global _SPLITS_CACHE
+    if _SPLITS_CACHE is not None:
+        return _SPLITS_CACHE
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(script_dir, "splits.json")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # Map sorted tuple of pins -> name (first match wins)
+        _SPLITS_CACHE = {tuple(sorted(entry["pins"])): entry["name"] for entry in data}
+        return _SPLITS_CACHE
+    except Exception:
+        _SPLITS_CACHE = {}
+        return _SPLITS_CACHE
+
+def get_split_name(pins_left_list):
+    """If pins_left (standing) matches a known split in splits.json, return its name; else None."""
+    if not pins_left_list or 1 in pins_left_list:
+        return None
+    key = tuple(sorted([p for p in pins_left_list if 1 <= p <= 10]))
+    if len(key) < 2:
+        return None
+    return _load_splits().get(key)
 
 # --- AI Logic ---
 def get_ai_suggestion(api_key, df_set, balls_in_bag, model_name):
@@ -147,6 +175,11 @@ try:
     con.commit()
 except duckdb.Error:
     pass
+try:
+    con.execute("ALTER TABLE shots ADD COLUMN split_name VARCHAR;")
+    con.commit()
+except duckdb.Error:
+    pass
 
 # --- Scoring Logic (per bowl.com / USBC) ---
 def get_pins_from_str(pins_str):
@@ -156,18 +189,6 @@ def get_pins_from_str(pins_str):
     if not s:
         return []
     return [int(p.strip()) for p in s.replace(',', ' ').split() if p.strip().isdigit()]
-
-def is_usbc_split(pins_left_list):
-    """True if headpin (1) is down and there is a gap between remaining pins."""
-    if not pins_left_list or 1 in pins_left_list:
-        return False
-    standing = sorted([p for p in pins_left_list if 1 <= p <= 10])
-    if len(standing) < 2:
-        return False
-    for i in range(len(standing) - 1):
-        if standing[i + 1] - standing[i] > 1:
-            return True
-    return False
 
 def _ball_scores_from_shots(df, shots_ordered):
     """Build list of pins knocked down per delivery for scoring."""
@@ -237,15 +258,28 @@ def calculate_scores(df):
             frame_scores[frame] = total
             i += len(frame_10_indices)
 
-    # Max possible: filled frames count; current incomplete can be 10+10+10 or 10+10 or 10 or open
+    # Max possible per USBC: spare frame = 10+next ball (max 20); strike = 10+next two (max 30)
     max_score = 0
     last_done = next((j for j in range(9, -1, -1) if frame_scores[j] is not None), -1)
     if last_done >= 0:
         max_score = frame_scores[last_done]
-    start = last_done + 1
+    start = last_done + 1  # first unscored frame (1-based frame num = start + 1)
     if start < 10:
-        # Incomplete frame: assume best (strike or spare+strike)
-        max_score += 30
+        # Current incomplete frame: no balls -> 30; one ball strike -> 30; one ball leave -> 20; frame 10 with 2 balls -> 20 or 30
+        shots_in_frame = [s for s in shots if s['frame_number'] == start + 1]
+        if not shots_in_frame:
+            max_score += 30
+        elif len(shots_in_frame) == 1:
+            if shots_in_frame[0]['shot_result'] == 'Strike':
+                max_score += 30
+            else:
+                max_score += 20  # leave -> best is spare (10+10)
+        else:
+            # frame 10 with 2 balls (waiting for fill): strike first -> 30, else spare -> 20
+            if shots_in_frame[0]['shot_result'] == 'Strike':
+                max_score += 30
+            else:
+                max_score += 20
         for _ in range(start + 1, 10):
             max_score += 30
     return frame_scores, total, max_score if max_score > 0 else 300
@@ -259,8 +293,8 @@ def _shot_display_symbol(shot, is_first_shot):
         return 'X'
     if shot_result == 'Spare':
         return '/'
-    if shot_result == 'Leave' and is_first_shot:
-        if is_usbc_split(pins):
+    if shot_result in ('Leave', 'Leave - Split') and is_first_shot:
+        if get_split_name(pins):
             return 'S'
         return str(10 - len(pins)) if pins else '-'
     if shot_result == 'Open':
@@ -268,48 +302,48 @@ def _shot_display_symbol(shot, is_first_shot):
         return str(len(kn)) if kn else '-'
     return '-'
 
+def _html_esc(s):
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 def render_score_sheet(df_game, frame_scores, total_score, max_score):
-    """One-row score sheet: 10 frames with symbols, running total, max at end."""
+    """Score sheet as a formatted HTML table: 10 frames with symbols, running total, max at end."""
     if df_game is None or df_game.empty:
-        frames_row = "| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | Total | Max |"
-        st.markdown(frames_row)
-        return
+        cells = [" "] * 10
+        run_cells = [""] * 10
+        total_str, max_str = "0", "300"
+    else:
+        shots = df_game.sort_values(by=['frame_number', 'shot_number', 'id']).to_dict('records')
+        by_frame = {}
+        for s in shots:
+            fn = int(s['frame_number'])
+            if fn not in by_frame:
+                by_frame[fn] = []
+            by_frame[fn].append(s)
+        cells = []
+        for f in range(1, 11):
+            if f not in by_frame:
+                cells.append(" ")
+                continue
+            fr = by_frame[f]
+            if len(fr) == 1:
+                cells.append(_shot_display_symbol(fr[0], True))
+            elif len(fr) == 2:
+                cells.append(f"{_shot_display_symbol(fr[0], True)} {_shot_display_symbol(fr[1], False)}")
+            else:
+                cells.append(f"{_shot_display_symbol(fr[0], True)} {_shot_display_symbol(fr[1], False)} {_shot_display_symbol(fr[2], False)}")
+        total_str, max_str = str(total_score), str(max_score)
+        run_cells = [str(frame_scores[f - 1]) if f - 1 < len(frame_scores) and frame_scores[f - 1] is not None else "" for f in range(1, 11)]
 
-    shots = df_game.sort_values(by=['frame_number', 'shot_number', 'id']).to_dict('records')
-    by_frame = {}
-    for s in shots:
-        fn = int(s['frame_number'])
-        if fn not in by_frame:
-            by_frame[fn] = []
-        by_frame[fn].append(s)
-
-    cells = []
-    for f in range(1, 11):
-        if f not in by_frame:
-            cells.append("  ")
-            continue
-        fr = by_frame[f]
-        if len(fr) == 1:
-            sym1 = _shot_display_symbol(fr[0], True)
-            cells.append(sym1)
-        elif len(fr) == 2:
-            sym1 = _shot_display_symbol(fr[0], True)
-            sym2 = _shot_display_symbol(fr[1], False)
-            cells.append(f"{sym1} {sym2}")
-        else:
-            sym1 = _shot_display_symbol(fr[0], True)
-            sym2 = _shot_display_symbol(fr[1], False)
-            sym3 = _shot_display_symbol(fr[2], False)
-            cells.append(f"{sym1} {sym2} {sym3}")
-
-    total_str = str(total_score)
-    max_str = str(max_score)
-    run_cells = [str(frame_scores[f - 1]) if f - 1 < len(frame_scores) and frame_scores[f - 1] is not None else "" for f in range(1, 11)]
-    row = " | ".join(cells) + " | **" + total_str + "** | " + max_str
-    run_row = " | ".join(run_cells)
-    st.markdown("**Frames:** 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | **Total** | Max")
-    st.markdown(row)
-    st.markdown("**Running:** " + run_row)
+    header = "".join(f"<th style='border:1px solid #ccc;padding:6px 8px;'>{f}</th>" for f in range(1, 11)) + "<th style='border:1px solid #ccc;padding:6px 8px;'>Total</th><th style='border:1px solid #ccc;padding:6px 8px;'>Max</th>"
+    row1 = "".join(f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{_html_esc(c)}</td>" for c in cells) + f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;font-weight:bold;'>{total_str}</td><td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{max_str}</td>"
+    row2 = "".join(f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{_html_esc(r)}</td>" for r in run_cells) + "<td></td><td></td>"
+    st.markdown(
+        f"<table style='border-collapse:collapse;margin:8px 0;'>"
+        f"<thead><tr style='background:#f0f0f0;'>{header}</tr></thead>"
+        f"<tbody><tr>{row1}</tr><tr>{row2}</tr></tbody>"
+        f"</table>",
+        unsafe_allow_html=True,
+    )
 
 
 # --- Azure Integration ---
@@ -334,6 +368,19 @@ def get_azure_client():
         st.error(f"Failed to connect to Azure: {e}")
         return None
 
+def get_storage_account_name_from_secrets():
+    """Parse storage account name from connection string or use AZURE_STORAGE_ACCOUNT_NAME. Returns None if not found."""
+    try:
+        connection_string = st.secrets.get("AZURE_STORAGE_CONNECTION_STRING")
+        if connection_string:
+            for part in connection_string.split(";"):
+                part = part.strip()
+                if part.lower().startswith("accountname="):
+                    return part.split("=", 1)[1].strip()
+        return st.secrets.get("AZURE_STORAGE_ACCOUNT_NAME")
+    except Exception:
+        return None
+
 def upload_set_to_azure(con, set_id):
     blob_service_client = get_azure_client()
     if not blob_service_client: return
@@ -355,7 +402,13 @@ def upload_set_to_azure(con, set_id):
         blob_name = f"set-{set_name.replace(' ', '_')}-{bowling_center}-{set_id}.csv"
         blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
         blob_client.upload_blob(csv_buffer.getvalue(), overwrite=True)
-        
+
+        # Option A: one blob per set — delete any other blob whose name contains this set_id
+        container_client = blob_service_client.get_container_client(container_name)
+        for b in container_client.list_blobs(name_starts_with="set-"):
+            if set_id in b.name and b.name != blob_name:
+                container_client.delete_blob(b.name)
+
         st.success(f"Set '{set_name}' saved successfully to Azure.")
     except Exception as e:
         st.error(f"An unexpected error occurred during upload: {e}")
@@ -377,6 +430,8 @@ def download_and_load_set(blob_name):
 
         if 'bowling_center' not in df.columns:
             df['bowling_center'] = ''
+        if 'split_name' not in df.columns:
+            df['split_name'] = None
 
         set_id_to_load = df['set_id'].iloc[0]
         con.execute("DELETE FROM shots WHERE set_id = ?", (set_id_to_load,))
@@ -417,7 +472,7 @@ def _derive_shot_result_and_pins_from_pins_left(row, edited_df):
         return 'Open', ', '.join(str(p) for p in knocked_2) if knocked_2 else 'N/A'
 
 def apply_edits_to_db(con, edited_df):
-    """Persist edited dataframe to DB. Derives shot_result/pins_knocked_down from pins_left for consistency."""
+    """Persist edited dataframe to DB. Derives shot_result/pins_knocked_down/split_name from pins_left for consistency."""
     if edited_df is None or edited_df.empty:
         return
     for _, row in edited_df.iterrows():
@@ -426,6 +481,13 @@ def apply_edits_to_db(con, edited_df):
             continue
         shot_result, pins_knocked_down = _derive_shot_result_and_pins_from_pins_left(row, edited_df)
         pins_left = row.get('pins_left')
+        pins_left_list = get_pins_from_str(pins_left) if pins_left is not None else []
+        split_name_val = None
+        if shot_result == "Leave" and row.get('shot_number') == 1 and pins_left_list:
+            sn = get_split_name(pins_left_list)
+            if sn:
+                shot_result = "Leave - Split"
+                split_name_val = sn
         pins_left_str = str(pins_left) if pins_left is not None and (not isinstance(pins_left, float) or not pd.isna(pins_left)) else ''
         lane_number = row.get('lane_number')
         bowling_ball = row.get('bowling_ball')
@@ -433,9 +495,9 @@ def apply_edits_to_db(con, edited_df):
         breakpoint_pos = row.get('breakpoint_pos')
         ball_reaction = row.get('ball_reaction')
         con.execute("""
-            UPDATE shots SET shot_result=?, pins_knocked_down=?, pins_left=?, lane_number=?, bowling_ball=?, arrows_pos=?, breakpoint_pos=?, ball_reaction=?
+            UPDATE shots SET shot_result=?, pins_knocked_down=?, pins_left=?, lane_number=?, bowling_ball=?, arrows_pos=?, breakpoint_pos=?, ball_reaction=?, split_name=?
             WHERE id=?
-        """, (shot_result, pins_knocked_down, pins_left_str, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, int(sid)))
+        """, (shot_result, pins_knocked_down, pins_left_str, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, split_name_val, int(sid)))
     con.commit()
 
 def download_blob_to_dataframe(blob_name):
@@ -679,6 +741,13 @@ with st.sidebar.expander("🤖 AI Settings"):
     st.session_state.selected_model_id = selected_model_id
 
 with st.sidebar.expander("⚠️ Danger Zone"):
+    storage_account_name = get_storage_account_name_from_secrets()
+    if storage_account_name:
+        st.markdown("[**Open Azure Portal**](https://portal.azure.com) (sign in to view your Storage account)")
+        st.caption("Storage account name (copy to search in portal):")
+        st.code(storage_account_name, language=None)
+    else:
+        st.caption("Add AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_NAME to secrets to see a link here.")
     if st.button("Delete Current Set"):
         con.execute("DELETE FROM shots WHERE set_id = ?", (st.session_state.set_id,))
         con.commit()
@@ -835,10 +904,16 @@ else:
         pins_left_standing_str = ", ".join(map(str, pins_left_standing))
         st.session_state.last_used_ball = st.session_state.bowling_ball
 
+        split_name_val = None
+        if shot_res == "Leave" and st.session_state.current_shot == 1 and pins_left_standing:
+            split_name_val = get_split_name(pins_left_standing)
+            if split_name_val:
+                shot_res = "Leave - Split"
+
         bowling_center = getattr(st.session_state, 'bowling_center', '') or ''
         con.execute(
-            "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, bowling_center) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, st.session_state.bowling_ball, arrows, breakpoint, st.session_state.ball_reaction, bowling_center)
+            "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, bowling_center, split_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, st.session_state.bowling_ball, arrows, breakpoint, st.session_state.ball_reaction, bowling_center, split_name_val)
         )
         con.commit()
         
@@ -903,6 +978,7 @@ if not df_set.empty:
             "frame_number": st.column_config.NumberColumn("frame", disabled=False),
             "shot_number": st.column_config.NumberColumn("shot", disabled=False),
             "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
+            "split_name": st.column_config.TextColumn("Split", disabled=True),
         },
     )
     if st.button("Save edits", key="btn_save_edits"):

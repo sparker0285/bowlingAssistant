@@ -294,3 +294,30 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 6. **Editable Data Grid:**
     *   **Reasoning:** User wanted to edit shot data after entry (bowling_ball, ball_reaction, trajectory, pins_left, shot_result) and have the app update shot_result from pins_left and recalculate scores.
     *   **Change:** The set data table was replaced with `st.data_editor` (key `edited_set_data`) showing all games in the set. Editable columns include frame_number, shot_number, shot_result, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction. "Save edits" writes the grid state to the database via `apply_edits_to_db`. Helper `_derive_shot_result_and_pins_from_pins_left(row, edited_df)` derives shot_result and pins_knocked_down from pins_left (and shot 1 pins for shot 2). Saving edits persists all rows and triggers a rerun so the score sheet and totals reflect the updated data.
+
+---
+## Session from Saturday, February 14, 2026 (follow-up)
+
+**User requests:** Five fixes/improvements after testing the six-feature release.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1. **Max possible score (USBC):**
+    *   **Reasoning:** After a 9-spare in frame 1, max was showing 300 instead of 290. Per USBC, a spare frame is 10 + next ball (max 20), not 30.
+    *   **Change:** The max_score calculation in `calculate_scores` was updated. For the current incomplete frame: no balls → 30; one ball strike → 30; one ball leave → 20; frame 10 with two balls → 20 or 30. Remaining frames still add 30 each. Example: 9-spare in frame 1 now correctly shows max 290.
+
+2. **Bowling center in Azure save and one blob per set:**
+    *   **Reasoning:** User wanted the saved file to always include the bowling center in the filename and, when adding/changing center after the set started, the next save should write a new file with the correct name (all set data) and remove the old file.
+    *   **Change:** Upload already used full set data (`SELECT * FROM shots WHERE set_id = ?`). After each successful upload, the app now lists blobs in the container whose name contains this set’s `set_id` and deletes any blob that is not the one just uploaded (Option A: exactly one blob per set). The blob name format remains `set-{set_name}-{bowling_center}-{set_id}.csv`.
+
+3. **Azure Portal link in Danger Zone:**
+    *   **Reasoning:** User wanted quick access to the Storage Account in the Azure Portal.
+    *   **Change:** Added `get_storage_account_name_from_secrets()` to parse the account name from `AZURE_STORAGE_CONNECTION_STRING` (or use `AZURE_STORAGE_ACCOUNT_NAME`). In the Danger Zone expander, added a link to https://portal.azure.com and the storage account name in a copyable code block so the user can search for it in the portal.
+
+4. **Split logic from splits.json:**
+    *   **Reasoning:** The previous gap-based logic incorrectly marked 6-10 as a split. User provided `splits.json` (same folder as the app) with the list of official splits. Only those leaves should be splits; split name should appear in Data for Set and shot result should be "Leave - Split".
+    *   **Change:** Removed `is_usbc_split()`. Added `_load_splits()` and `get_split_name(pins_left_list)` to load `splits.json` from the script directory and match first-ball leaves by sorted pins (order-independent). Only leaves in the list are splits. Added `split_name` column to `shots` (ALTER TABLE). On submit, a first-ball Leave that matches the list is stored as shot_result "Leave - Split" with split_name set. Score sheet shows "S" only for leaves in the list. Data for Set grid includes a read-only "Split" column. `apply_edits_to_db` derives shot_result and split_name from pins_left when saving edits. Azure load adds `split_name` to the dataframe if missing.
+
+5. **Score sheet as a table:**
+    *   **Reasoning:** User wanted the score sheet formatted like a table for a cleaner look.
+    *   **Change:** `render_score_sheet` now outputs an HTML table: header row (1–10, Total, Max), one row of frame symbols (X, /, -, S, counts), and one row of running totals. Uses borders and padding for readability.
