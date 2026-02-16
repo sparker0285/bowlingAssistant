@@ -321,3 +321,13 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 5. **Score sheet as a table:**
     *   **Reasoning:** User wanted the score sheet formatted like a table for a cleaner look.
     *   **Change:** `render_score_sheet` now outputs an HTML table: header row (1–10, Total, Max), one row of frame symbols (X, /, -, S, counts), and one row of running totals. Uses borders and padding for readability.
+
+**Update (Follow-up):** User reported two issues after testing.
+
+6. **Score sheet header readability:**
+    *   **Reasoning:** Header row had white text on light gray and was hard to read.
+    *   **Change:** Header `<th>` cells now use explicit dark text and slightly darker gray background (`color:#1a1a1a`, `background:#e0e0e0`) for better contrast.
+
+7. **Save Edits error and table columns:**
+    *   **Reasoning:** Clicking Save Edits after editing the data table caused `AttributeError` on `edited_data.empty` (e.g. when Streamlit Cloud returns a non-DataFrame for the data_editor state). User also wanted only Pins Left shown in the table, not Pins knocked down.
+    *   **Change:** Save-edits logic now checks `isinstance(edited_data, pd.DataFrame)` before using `.empty`; if the value is not a DataFrame, the app tries `pd.DataFrame(edited_data)` and saves if valid, otherwise shows a warning and still clears state. Removed `pins_knocked_down` from the Data for Set grid via `display_df.drop(columns=['pins_knocked_down'], errors='ignore')`; only **pins_left** is shown. `apply_edits_to_db` still derives `pins_knocked_down` from `pins_left`, so the database is updated correctly on save.

@@ -334,12 +334,12 @@ def render_score_sheet(df_game, frame_scores, total_score, max_score):
         total_str, max_str = str(total_score), str(max_score)
         run_cells = [str(frame_scores[f - 1]) if f - 1 < len(frame_scores) and frame_scores[f - 1] is not None else "" for f in range(1, 11)]
 
-    header = "".join(f"<th style='border:1px solid #ccc;padding:6px 8px;'>{f}</th>" for f in range(1, 11)) + "<th style='border:1px solid #ccc;padding:6px 8px;'>Total</th><th style='border:1px solid #ccc;padding:6px 8px;'>Max</th>"
+    header = "".join(f"<th style='border:1px solid #ccc;padding:6px 8px;color:#1a1a1a;background:#e0e0e0;'>{f}</th>" for f in range(1, 11)) + "<th style='border:1px solid #ccc;padding:6px 8px;color:#1a1a1a;background:#e0e0e0;'>Total</th><th style='border:1px solid #ccc;padding:6px 8px;color:#1a1a1a;background:#e0e0e0;'>Max</th>"
     row1 = "".join(f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{_html_esc(c)}</td>" for c in cells) + f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;font-weight:bold;'>{total_str}</td><td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{max_str}</td>"
     row2 = "".join(f"<td style='border:1px solid #ccc;padding:6px 8px;text-align:center;'>{_html_esc(r)}</td>" for r in run_cells) + "<td></td><td></td>"
     st.markdown(
         f"<table style='border-collapse:collapse;margin:8px 0;'>"
-        f"<thead><tr style='background:#f0f0f0;'>{header}</tr></thead>"
+        f"<thead><tr>{header}</tr></thead>"
         f"<tbody><tr>{row1}</tr><tr>{row2}</tr></tbody>"
         f"</table>",
         unsafe_allow_html=True,
@@ -951,9 +951,17 @@ render_score_sheet(df_current_game, frame_scores, total_score, max_score)
 # --- Analytical Dashboard (editable grid) ---
 if st.session_state.get('save_edits_clicked'):
     edited_data = st.session_state.get('edited_set_data')
-    if edited_data is not None and not edited_data.empty:
+    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty:
         apply_edits_to_db(con, edited_data)
         st.success("Edits saved. Score sheet and totals will update.")
+    elif edited_data is not None and not isinstance(edited_data, pd.DataFrame):
+        try:
+            df_edit = pd.DataFrame(edited_data)
+            if not df_edit.empty:
+                apply_edits_to_db(con, df_edit)
+                st.success("Edits saved. Score sheet and totals will update.")
+        except Exception:
+            st.warning("Could not save edits; please try again.")
     if 'save_edits_clicked' in st.session_state:
         del st.session_state['save_edits_clicked']
     if 'edited_set_data' in st.session_state:
@@ -963,6 +971,7 @@ if st.session_state.get('save_edits_clicked'):
 st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
     display_df = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).copy()
+    display_df = display_df.drop(columns=['pins_knocked_down'], errors='ignore')
     st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
     edited_df = st.data_editor(
         display_df,
