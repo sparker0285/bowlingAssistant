@@ -394,3 +394,18 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 3. **Score not updating after Save Edits:**
     *   **Reasoning:** After editing pins_left and saving, the score sheet and totals did not reflect the change. Possible causes: wrong row alignment when merging (fixed by reversing edited_data when table is descending), or pins_left not normalized when writing to DB.
     *   **Change:** In `apply_edits_to_db`, normalized `pins_left_str` so that None/NaN becomes '' and string "nan" is stripped to avoid writing invalid values. Merge order fix (reverse edited_data before update) ensures the edited row is written to the correct shot in the DB so scores recalculate correctly on the next run.
+
+---
+## Session from Monday, February 16, 2026 (follow-up 2)
+
+**User reports:** (1) Save Edits still not persisting—change to Pins left reverted on refresh. (2) DuckDB NotImplementedError on first shot of second game.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1. **Save Edits: merge by game-frame-shot key:**
+    *   **Reasoning:** Merging by row index (including after reversing) was unreliable (e.g. session state or widget order could differ from display order), so edits could apply to the wrong row and the user's change was not persisted.
+    *   **Change:** Added `_parse_game_frame_shot(gfs)` to parse the "game-frame-shot" string into (game_number, frame_number, shot_number). Save block now merges by this key: for each row in full_df, find the row in edited_data whose game-frame-shot parses to the same (g, f, s), then copy only the editable columns from that edited row into merged. No reliance on row order or index. apply_edits_to_db(con, merged) then persists the correct row updates so edits and score recalc persist after refresh.
+
+2. **DuckDB INSERT: native Python types:**
+    *   **Reasoning:** DuckDB can raise NotImplementedError when parameterized INSERT receives numpy/pandas types (e.g. numpy.int64 from pandas/DuckDB results or selectbox).
+    *   **Change:** In `submit_shot`, all INSERT parameters are now converted to native Python types before calling con.execute: set_id, set_name, game_id, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, bowling_ball, ball_reaction, bowling_center, split_name_val as str (or None); game_number, frame_number, shot_number as int(); arrows_pos and breakpoint_pos as int() when present, else None. This prevents the second-game first-shot crash.

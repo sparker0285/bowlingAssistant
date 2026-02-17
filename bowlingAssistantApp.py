@@ -798,29 +798,55 @@ with st.sidebar.expander("⚠️ Danger Zone"):
         st.rerun()
 
 # --- Save Edits (run before refetch so next run sees updated data) ---
+def _parse_game_frame_shot(gfs):
+    """Parse 'game-frame-shot' string to (game_number, frame_number, shot_number)."""
+    if pd.isna(gfs) or gfs is None or str(gfs).strip() == "":
+        return None, None, None
+    parts = str(gfs).strip().split("-")
+    if len(parts) != 3:
+        return None, None, None
+    try:
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except (ValueError, TypeError):
+        return None, None, None
+
 if st.session_state.get('save_edits_clicked'):
     edited_data = st.session_state.get('edited_set_data')
     set_id_for_save = st.session_state.get('save_edits_set_id') or st.session_state.get('set_id')
     did_save = False
-    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty and set_id_for_save:
+    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty and set_id_for_save and "game-frame-shot" in edited_data.columns:
         full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
         full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
-        if not full_df.empty and len(full_df) == len(edited_data):
-            edited_data = edited_data.iloc[::-1].reset_index(drop=True)
+        if not full_df.empty:
             merged = full_df.copy()
-            merged.update(edited_data)
+            edit_cols = [c for c in edited_data.columns if c != "game-frame-shot" and c in merged.columns]
+            for idx, full_row in merged.iterrows():
+                g, f, s = int(full_row["game_number"]), int(full_row["frame_number"]), int(full_row["shot_number"])
+                for ed_idx, edit_row in edited_data.iterrows():
+                    eg, ef, es = _parse_game_frame_shot(edit_row.get("game-frame-shot"))
+                    if (eg, ef, es) == (g, f, s):
+                        for col in edit_cols:
+                            merged.at[idx, col] = edit_row[col]
+                        break
             apply_edits_to_db(con, merged)
             did_save = True
     elif edited_data is not None and not isinstance(edited_data, pd.DataFrame):
         try:
-            df_edit = pd.DataFrame(edited_data).reset_index(drop=True)
-            if not df_edit.empty and set_id_for_save:
+            df_edit = pd.DataFrame(edited_data)
+            if not df_edit.empty and "game-frame-shot" in df_edit.columns and set_id_for_save:
                 full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
                 full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
-                if not full_df.empty and len(full_df) == len(df_edit):
-                    df_edit = df_edit.iloc[::-1].reset_index(drop=True)
+                if not full_df.empty:
                     merged = full_df.copy()
-                    merged.update(df_edit)
+                    edit_cols = [c for c in df_edit.columns if c != "game-frame-shot" and c in merged.columns]
+                    for idx, full_row in merged.iterrows():
+                        g, f, s = int(full_row["game_number"]), int(full_row["frame_number"]), int(full_row["shot_number"])
+                        for _, edit_row in df_edit.iterrows():
+                            eg, ef, es = _parse_game_frame_shot(edit_row.get("game-frame-shot"))
+                            if (eg, ef, es) == (g, f, s):
+                                for col in edit_cols:
+                                    merged.at[idx, col] = edit_row[col]
+                                break
                     apply_edits_to_db(con, merged)
                     did_save = True
         except Exception:
@@ -994,9 +1020,27 @@ else:
                 shot_res = "Leave - Split"
 
         bowling_center = getattr(st.session_state, 'bowling_center', '') or ''
+        ins_args = (
+            str(st.session_state.set_id),
+            str(st.session_state.set_name),
+            str(st.session_state.game_id),
+            int(st.session_state.game_number),
+            int(st.session_state.current_frame),
+            int(st.session_state.current_shot),
+            str(shot_res),
+            str(pins_knocked_down_str),
+            str(pins_left_standing_str),
+            str(lane_number) if lane_number else None,
+            str(st.session_state.bowling_ball) if st.session_state.bowling_ball else None,
+            int(arrows) if arrows is not None and not (isinstance(arrows, float) and pd.isna(arrows)) else None,
+            int(breakpoint) if breakpoint is not None and not (isinstance(breakpoint, float) and pd.isna(breakpoint)) else None,
+            str(st.session_state.ball_reaction) if st.session_state.ball_reaction else None,
+            str(bowling_center) if bowling_center else None,
+            str(split_name_val) if split_name_val else None,
+        )
         con.execute(
             "INSERT INTO shots (set_id, set_name, game_id, game_number, frame_number, shot_number, shot_result, pins_knocked_down, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, bowling_center, split_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (st.session_state.set_id, st.session_state.set_name, st.session_state.game_id, st.session_state.game_number, st.session_state.current_frame, st.session_state.current_shot, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, st.session_state.bowling_ball, arrows, breakpoint, st.session_state.ball_reaction, bowling_center, split_name_val)
+            ins_args,
         )
         con.commit()
         
