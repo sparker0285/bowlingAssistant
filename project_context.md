@@ -423,3 +423,26 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** The Data for Set table and Save button are now inside `st.form("save_edits_form")`. On `st.form_submit_button("Save edits")`, the code uses the returned `edited_visible` dataframe directly (no session state): merges by game-frame-shot into full_df, calls `apply_edits_to_db(con, merged)`, shows success, and reruns so the table and score sheet refetch. Removed the separate save block’s dependency on this flow; the top-of-script save block remains for any legacy `save_edits_clicked`/`pending_save_edits` path. Caption updated: **Click outside the edited cell or press Enter before clicking Save edits** so the data_editor commits the cell before form submit (Streamlit requirement).
 
 **Backup (working version):** A copy of the app was saved to `Archive/bowlingAssistantApp_working_20260216.py` for later reference (good working version as of Feb 16, 2026).
+
+---
+## Session from Monday, February 17, 2026
+
+**User Story:** The user requested a visual pin selector to make it easier to identify pins left on a shot.
+1.  **Visual Pin Selector:** The user wants to click on pins arranged in a triangle formation to select the pins left standing.
+2.  **Context Awareness:** The selector should be smart about which pins are enabled based on the shot number (e.g., disable pins already knocked down).
+3.  **AI Model Switch:** The user also requested a switch to toggle between Gemini 1.5 Flash and 2.5 Flash models.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1.  **AI Model Selection:**
+    *   **Reasoning:** The user wanted to be able to switch between AI models for cost/performance trade-offs.
+    *   **Change:** Added a sidebar expander "AI Settings" with a selectbox to choose between `gemini-2.5-flash` (default) and `gemini-1.5-flash`. The selected model ID is passed to the AI functions.
+
+2.  **Visual Pin Selector:**
+    *   **Reasoning:** The user found the multiselect dropdown for pins cumbersome and wanted a visual interface.
+    *   **Change:** Implemented a visual pin deck using `st.columns` to create a 4-row triangle layout.
+    *   **Change:** Added `st.session_state.pin_states` to track the standing/knocked-down state of each pin.
+    *   **Change:** Created a `pin_btn` helper function that renders a button for each pin. Clicking the button toggles its state in `pin_states`.
+    *   **Change:** Added logic to disable pins that were already knocked down in the previous shot (for shot 2 or shot 3 in the 10th frame).
+    *   **Change:** Updated `submit_shot` to read the selected pins from `pin_states` instead of the old multiselect widget.
+    *   **Change:** Removed the old ASCII art and multiselect widget.

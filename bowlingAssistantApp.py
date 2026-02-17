@@ -965,29 +965,132 @@ else:
     st.text_input("Ball Reaction", key="ball_reaction")
     
     st.subheader("Pins Left Standing")
-    st.code("""
-    7   8   9   10
-      4   5   6
-        2   3
-          1
-    """, language=None)
-
-    is_spare_or_strike = st.session_state.shot_result in ["Spare", "Strike"]
     
-    if st.session_state.current_shot == 1:
-        options = list(range(1, 11))
-        help_text = "Select the pins left standing after your first shot."
-    else:
-        options = st.session_state.get('pins_left_after_first_shot', [])
-        help_text = "Select the pins still standing to record an open frame."
+    # --- Visual Pin Selector ---
+    if 'pin_states' not in st.session_state:
+        st.session_state.pin_states = {i: False for i in range(1, 11)}
 
-    st.multiselect(
-        "Pins Left Standing",
-        options=options,
-        key="pins_left_multiselect",
-        help=help_text,
-        disabled=is_spare_or_strike
-    )
+    # Reset pins if it's a new shot context (simple check: if all false, maybe reset? 
+    # Actually, we reset after submit. But if we reload, we want them clear unless we are editing?
+    # For now, we assume they start clear for a new shot.)
+
+    def toggle_pin(p):
+        st.session_state.pin_states[p] = not st.session_state.pin_states[p]
+
+    # Determine which pins are disabled (already knocked down in shot 1)
+    disabled_pins = []
+    if st.session_state.current_shot > 1:
+        # If it's shot 2 (or 3 in 10th), we only enable pins that were left standing.
+        # Logic: pins_left_after_first_shot contains the pins STANDING.
+        # So pins NOT in that list are already down -> disabled.
+        # Wait, if it's a spare attempt, we want to select from the pins that are STANDING.
+        # So pins that are NOT standing are disabled.
+        standing_from_prev = st.session_state.get('pins_left_after_first_shot', [])
+        if not standing_from_prev and st.session_state.current_shot == 2 and st.session_state.current_frame < 10:
+             # If no pins standing after shot 1, it was a strike, so shot 2 shouldn't happen (logic handles this elsewhere, but safety check)
+             pass
+        elif st.session_state.current_frame == 10 and st.session_state.current_shot == 3:
+             # Frame 10 shot 3:
+             # If shot 2 was a spare, all pins are reset -> all enabled.
+             # If shot 2 was open (but shot 1 was strike), we have pins left from shot 2.
+             # Let's check the previous shot result.
+             prev_shot_res_df = df_current_game[(df_current_game['frame_number'] == 10) & (df_current_game['shot_number'] == 2)]
+             if not prev_shot_res_df.empty:
+                 res = prev_shot_res_df.iloc[0]['shot_result']
+                 if res == 'Spare' or res == 'Strike':
+                     standing_from_prev = list(range(1, 11)) # All pins fresh
+                 else:
+                     # Open frame after a strike in shot 1? No, that ends the game.
+                     # Wait, Strike then Open? 
+                     # Shot 1: X. Shot 2: 7 pins. Shot 3: spare attempt on 3 pins.
+                     # So we need pins left from shot 2.
+                     pins_left_s2 = prev_shot_res_df.iloc[0]['pins_left']
+                     standing_from_prev = get_pins_from_str(pins_left_s2)
+
+        # Pins NOT in standing_from_prev are disabled (already down)
+        # Exception: if it's a fresh rack (Strike or Spare previously), standing_from_prev should be empty or we treat it as full?
+        # In our logic, if we strike, we clear pins_left_after_first_shot.
+        # So if current_shot == 1, all enabled.
+        pass
+
+    # Calculate disabled pins for rendering
+    pins_to_enable = list(range(1, 11))
+    if st.session_state.current_shot > 1:
+        # If we are shooting at a spare, only enable the pins that are standing
+        # If the previous shot was a strike (in 10th) or spare, we have a full rack.
+        is_fresh_rack = False
+        if st.session_state.current_frame == 10:
+             # Check previous shots in this frame
+             shots_done = df_current_game[df_current_game['frame_number'] == 10]
+             if st.session_state.current_shot == 2:
+                 if not shots_done.empty and shots_done.iloc[0]['shot_result'] == 'Strike':
+                     is_fresh_rack = True
+             elif st.session_state.current_shot == 3:
+                 # If shot 2 was spare, or shot 2 was strike (following strike), fresh rack.
+                 if len(shots_done) >= 2:
+                     s2_res = shots_done[shots_done['shot_number'] == 2].iloc[0]['shot_result']
+                     if s2_res == 'Spare' or s2_res == 'Strike':
+                         is_fresh_rack = True
+        
+        if not is_fresh_rack:
+            # We are shooting at leaves.
+            # pins_left_after_first_shot should hold the current leaves if we are in shot 2 of standard frame
+            # or shot 3 of 10th (after strike then open? no that ends game).
+            # Actually, for 10th frame S1=X, S2=Open -> S3 is spare attempt on S2 leaves.
+            # For standard frame S1=Open -> S2 is spare attempt.
+            # So we use st.session_state.pins_left_after_first_shot which we update in submit_shot.
+            pins_to_enable = st.session_state.get('pins_left_after_first_shot', [])
+
+    # Helper to create a pin button
+    def pin_btn(num):
+        is_standing = st.session_state.pin_states[num]
+        disabled = num not in pins_to_enable
+        
+        # If disabled, force state to False (Down) just in case, or keep as is? 
+        # Better to force False visually if it's already down.
+        if disabled:
+            is_standing = False
+        
+        type_ = "primary" if is_standing else "secondary"
+        
+        # Label: just the number
+        label = str(num)
+        
+        # We use a callback to toggle. 
+        # Note: disabled buttons can't trigger callback.
+        st.button(label, key=f"pin_{num}", type=type_, disabled=disabled, on_click=toggle_pin, args=(num,), use_container_width=True)
+
+    # Layout: 9 columns to center the triangle
+    # Row 4 (Back): 7, 8, 9, 10 -> indices 1, 3, 5, 7
+    # Row 3: 4, 5, 6 -> indices 2, 4, 6
+    # Row 2: 2, 3 -> indices 3, 5
+    # Row 1: 1 -> index 4
+    
+    # We'll use a container for the pin deck
+    with st.container(border=True):
+        st.caption("Tap pins to mark them as **Standing** (Red).")
+        
+        # Row 4 (7, 8, 9, 10)
+        r4 = st.columns(9)
+        with r4[1]: pin_btn(7)
+        with r4[3]: pin_btn(8)
+        with r4[5]: pin_btn(9)
+        with r4[7]: pin_btn(10)
+        
+        # Row 3 (4, 5, 6)
+        r3 = st.columns(9)
+        with r3[2]: pin_btn(4)
+        with r3[4]: pin_btn(5)
+        with r3[6]: pin_btn(6)
+        
+        # Row 2 (2, 3)
+        r2 = st.columns(9)
+        with r2[3]: pin_btn(2)
+        with r2[5]: pin_btn(3)
+        
+        # Row 1 (1)
+        r1 = st.columns(9)
+        with r1[4]: pin_btn(1)
 
     def submit_shot():
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
@@ -995,7 +1098,12 @@ else:
         breakpoint = st.session_state.breakpoint_pos if use_trajectory else None
         
         shot_res = st.session_state.shot_result
-        pins_left_standing = st.session_state.pins_left_multiselect
+        
+        # Get pins standing from our state
+        pins_left_standing = [p for p, standing in st.session_state.pin_states.items() if standing]
+        # Filter out any that shouldn't be there (sanity check)
+        # pins_left_standing = [p for p in pins_left_standing if p in pins_to_enable] # Optional strictness
+
         pins_knocked_down_str = "N/A"
 
         if st.session_state.current_shot == 1:
@@ -1008,10 +1116,16 @@ else:
                 pins_knocked_down_str = ", ".join(map(str, knocked_down))
         else:
             prev_pins_left = st.session_state.get('pins_left_after_first_shot', [])
+            # If it's a fresh rack in 10th (e.g. X X 9), prev_pins_left might be empty or irrelevant.
+            # We need to handle the context of "what pins were available".
+            available_pins = pins_to_enable # calculated above
+            
             if shot_res == "Spare":
-                pins_knocked_down_str = ", ".join(map(str, prev_pins_left))
+                # All available pins knocked down
+                pins_knocked_down_str = ", ".join(map(str, available_pins))
             else:
-                knocked_down = [p for p in prev_pins_left if p not in pins_left_standing]
+                # Open: pins standing are left. Knocked down = available - standing
+                knocked_down = [p for p in available_pins if p not in pins_left_standing]
                 pins_knocked_down_str = ", ".join(map(str, knocked_down))
 
         pins_left_standing_str = ", ".join(map(str, pins_left_standing))
@@ -1048,6 +1162,9 @@ else:
         )
         con.commit()
         
+        # Reset pin states for next shot
+        st.session_state.pin_states = {i: False for i in range(1, 11)}
+
         if st.session_state.current_frame < 10:
             if st.session_state.current_shot == 2 or shot_res == "Strike":
                 st.session_state.current_frame += 1
@@ -1069,7 +1186,6 @@ else:
             else:
                 st.session_state.game_over = True
         
-        st.session_state.pins_left_multiselect = []
         st.session_state.ball_reaction = ""
         
     st.button("Submit Shot", use_container_width=True, on_click=submit_shot)
