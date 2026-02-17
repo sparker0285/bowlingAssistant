@@ -446,3 +446,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Change:** Added logic to disable pins that were already knocked down in the previous shot (for shot 2 or shot 3 in the 10th frame).
     *   **Change:** Updated `submit_shot` to read the selected pins from `pin_states` instead of the old multiselect widget.
     *   **Change:** Removed the old ASCII art and multiselect widget.
+
+**Update (Follow-up):** The user reported that the visual pin selector layout was not mobile-friendly.
+
+3.  **Mobile-Friendly Pin Layout:**
+    *   **Reasoning:** The 9-column grid layout was too wide for mobile screens, causing the buttons to be squished or misaligned.
+    *   **Change:** Refactored the pin deck layout to use a 4-row structure with `st.columns` and relative width spacers. This allows the buttons to be centered correctly on narrower screens while maintaining the triangle formation.

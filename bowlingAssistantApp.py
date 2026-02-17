@@ -1042,7 +1042,7 @@ else:
             pins_to_enable = st.session_state.get('pins_left_after_first_shot', [])
 
     # Helper to create a pin button
-    def pin_btn(num):
+    def pin_btn(num, container):
         is_standing = st.session_state.pin_states[num]
         disabled = num not in pins_to_enable
         
@@ -1058,39 +1058,39 @@ else:
         
         # We use a callback to toggle. 
         # Note: disabled buttons can't trigger callback.
-        st.button(label, key=f"pin_{num}", type=type_, disabled=disabled, on_click=toggle_pin, args=(num,), use_container_width=True)
+        container.button(label, key=f"pin_{num}", type=type_, disabled=disabled, on_click=toggle_pin, args=(num,), use_container_width=True)
 
-    # Layout: 9 columns to center the triangle
-    # Row 4 (Back): 7, 8, 9, 10 -> indices 1, 3, 5, 7
-    # Row 3: 4, 5, 6 -> indices 2, 4, 6
-    # Row 2: 2, 3 -> indices 3, 5
-    # Row 1: 1 -> index 4
+    # Layout: 4 rows, using spacers to center.
+    # Row 4 (7, 8, 9, 10): 4 columns (equal width)
+    # Row 3 (4, 5, 6): 5 columns [0.5, 1, 1, 1, 0.5] -> 3 buttons centered
+    # Row 2 (2, 3): 4 columns [1, 1, 1, 1] -> 2 buttons in middle
+    # Row 1 (1): 3 columns [1.5, 1, 1.5] -> 1 button in middle
     
     # We'll use a container for the pin deck
     with st.container(border=True):
         st.caption("Tap pins to mark them as **Standing** (Red).")
         
         # Row 4 (7, 8, 9, 10)
-        r4 = st.columns(9)
-        with r4[1]: pin_btn(7)
-        with r4[3]: pin_btn(8)
-        with r4[5]: pin_btn(9)
-        with r4[7]: pin_btn(10)
+        r4 = st.columns(4)
+        pin_btn(7, r4[0])
+        pin_btn(8, r4[1])
+        pin_btn(9, r4[2])
+        pin_btn(10, r4[3])
         
         # Row 3 (4, 5, 6)
-        r3 = st.columns(9)
-        with r3[2]: pin_btn(4)
-        with r3[4]: pin_btn(5)
-        with r3[6]: pin_btn(6)
+        r3 = st.columns([0.5, 1, 1, 1, 0.5])
+        pin_btn(4, r3[1])
+        pin_btn(5, r3[2])
+        pin_btn(6, r3[3])
         
         # Row 2 (2, 3)
-        r2 = st.columns(9)
-        with r2[3]: pin_btn(2)
-        with r2[5]: pin_btn(3)
+        r2 = st.columns([1, 1, 1, 1])
+        pin_btn(2, r2[1])
+        pin_btn(3, r2[2])
         
         # Row 1 (1)
-        r1 = st.columns(9)
-        with r1[4]: pin_btn(1)
+        r1 = st.columns([1.5, 1, 1.5])
+        pin_btn(1, r1[1])
 
     def submit_shot():
         use_trajectory = st.session_state.current_shot == 1 or (st.session_state.current_frame == 10 and st.session_state.current_shot > 1)
