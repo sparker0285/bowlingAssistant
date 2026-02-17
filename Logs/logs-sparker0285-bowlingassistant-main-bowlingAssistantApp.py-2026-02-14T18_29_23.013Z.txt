@@ -1,0 +1,259 @@
+
+[     UTC     ] Logs for sethsbowlingassistant.streamlit.app/
+────────────────────────────────────────────────────────────────────────────────────────
+[18:05:44] 🚀 Starting up repository: 'bowlingassistant', branch: 'main', main module: 'bowlingAssistantApp.py'
+[18:05:44] 🐙 Cloning repository...
+[18:05:46] 🐙 Cloning into '/mount/src/bowlingassistant'...
+
+[18:05:46] 🐙 Cloned repository!
+[18:05:46] 🐙 Pulling code changes from Github...
+[18:05:47] 📦 Processing dependencies...
+
+──────────────────────────────────────── uv ───────────────────────────────────────────
+
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 72 packages in 1.19s
+Prepared 72 packages in 2.75s
+Installed 72 packages in 269ms
+ + altair==6.0.0
+ + annotated-types==0.7.0
+ + attrs==25.4.0
+ + azure-core==1.38.1
+ + azure-identity==1.25.2
+ + azure-storage-blob[2026-02-14 18:05:51.588270] ==12.28.0
+ + blinker==1.9.0
+ + cachetools==6.2.6
+ + certifi==2026.1.4
+ + cffi==2.0.0
+ + charset-normalizer==3.4.4
+ + click==8.3.1
+ + cryptography==46.0.5
+ + duckdb==1.4.4
+ + duckdb-engine==0.17.0
+ + gitdb==4.0.12
+ + gitpython==3.1.46
+ + google-ai-generativelanguage==0.6.15
+ + google-api-core==2.29.0
+ + [2026-02-14 18:05:51.588763] google-api-python-client==2.190.0
+ + google-auth==2.48.0
+ + google-auth-httplib2==0.3.0
+ + google-generativeai==0.8.6
+ + googleapis-common-protos==1.72.0
+ + greenlet==3.3.1
+ [2026-02-14 18:05:51.589004] + grpcio==1.78.0
+ + grpcio-status==1.71.2
+ + httplib2==0.31.2
+ + idna==3.11
+ + isodate==0.7.2
+ +[2026-02-14 18:05:51.589227]  jinja2==3.1.6
+ + jsonschema==4.26.0
+ + jsonschema-specifications==2025.9.1
+ + markupsafe==3.0.3
+ + msal==1.34.0
+ +[2026-02-14 18:05:51.589480]  msal-extensions==1.3.1
+ + narwhals==2.16.0
+ + numpy==2.4.2
+ + packaging==26.0
+ + pandas==2.3.3[2026-02-14 18:05:51.589651] 
+ + pillow==12.1.1
+ + proto-plus==1.27.1
+ + protobuf==5.29.6
+ + pyarrow==23.0.0
+ + pyasn1==0.6.2
+ + pyasn1-modules==[2026-02-14 18:05:51.589787] 0.4.2
+ + pycparser==3.0
+ + pydantic==2.12.5
+ + pydantic-core==2.41.5
+ + pydeck==0.9.1
+ + [2026-02-14 18:05:51.589911] pyjwt==2.11.0
+ + pyparsing==3.3.2
+ + python-dateutil==2.9.0.post0
+ + pytz==2025.2
+ + referencing==0.37.0
+ + requests==2.32.5[2026-02-14 18:05:51.590047] 
+ + rpds-py==0.30.0
+ + rsa==4.9.1
+ + six==1.17.0
+ + smmap==5.0.2[2026-02-14 18:05:51.590196] 
+ + sqlalchemy==2.0.46
+ + streamlit==1.54.0
+ + tenacity==9.1.4
+ + toml==0.10.2
+ + tornado==6.5.4
+ + tqdm==4.67.3
+ + typing-extensions==4.15.0
+ + typing-inspection==0.4.2
+ + tzdata==2025.3[2026-02-14 18:05:51.590525] 
+ + uritemplate==4.2.0
+ + urllib3==2.6.3
+ + watchdog==6.0.0
+Checking if Streamlit is installed
+Found Streamlit version 1.54.0 in the environment
+Installing rich for an improved exception logging
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 4 packages in 171ms
+Prepared 4 packages in 124ms
+Installed 4 packages in 15ms
+ + markdown-it-py==4.0.0
+ [2026-02-14 18:05:53.643908] + mdurl==0.1.2
+ + pygments==2.19.2
+ + rich==14.3.2
+
+────────────────────────────────────────────────────────────────────────────────────────
+
+[18:05:54] 🐍 Python dependencies were installed from /mount/src/bowlingassistant/requirements.txt using uv.
+Check if streamlit is installed
+Streamlit is already installed
+[18:05:55] 📦 Processed dependencies!
+
+
+
+/mount/src/bowlingassistant/bowlingAssistantApp.py:10: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+[18:19:30] 🐙 Pulling code changes from Github...
+[18:19:31] 📦 Processing dependencies...
+[18:19:31] 📦 Processed dependencies!
+[18:19:32] 🔄 Updated app!
+[18:23:23] 🐙 Pulling code changes from Github...
+[18:23:24] 📦 Processing dependencies...
+[18:23:24] 📦 Processed dependencies!
+[18:23:25] 🔄 Updated app!
+[18:23:35] 🐙 Pulling code changes from Github...
+[18:23:36] 📦 Processing dependencies...
+[18:23:36] 📦 Processed dependencies!
+[18:23:37] 🔄 Updated app!
+[18:27:26] 🐙 Pulling code changes from Github...
+[18:27:28] 📦 Processing dependencies...
+[18:27:28] 📦 Processed dependencies!
+[18:27:29] 🔄 Updated app!
+[18:28:27] 🔌 Disconnecting...
+[18:28:33] 🖥 Provisioning machine...
+[18:28:39] 🎛 Preparing system...
+[18:28:44] ⛓ Spinning up manager process...
+[18:28:32] 🚀 Starting up repository: 'bowlingassistant', branch: 'main', main module: 'bowlingAssistantApp.py'
+[18:28:32] 🐙 Cloning repository...
+[18:28:33] 🐙 Cloning into '/mount/src/bowlingassistant'...
+
+[18:28:33] 🐙 Cloned repository!
+[18:28:33] 🐙 Pulling code changes from Github...
+[18:28:34] 📦 Processing dependencies...
+
+──────────────────────────────────────── uv ───────────────────────────────────────────
+
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 72 packages in 1.04s
+Prepared 72 packages in 2.50s
+Installed 72 packages in 248ms
+ + altair==6.0.0
+ + annotated-types==0.7.0
+ + attrs==25.4.0
+ + azure-core==1.38.1
+ + azure-identity==1.25.2
+ + azure-storage-blob==12.28.0
+ + blinker==1.9.0
+ + cachetools==6.2.6[2026-02-14 18:28:38.807358] 
+ + certifi==2026.1.4
+ + cffi==2.0.0
+ + charset-normalizer==3.4.4
+ + click==8.3.1
+ + cryptography==46.0.5
+ + duckdb==1.4.4
+ + [2026-02-14 18:28:38.807605] duckdb-engine==0.17.0
+ + gitdb==4.0.12
+ + gitpython==3.1.46
+ + google-ai-generativelanguage==0.6.15
+ + google-api-core==2.29.0
+ + google-api-python-client==2.190.0[2026-02-14 18:28:38.807844] 
+ + google-auth==2.48.0
+ + google-auth-httplib2==0.3.0
+ + google-generativeai==0.8.6
+ + googleapis-common-protos==1.72.0
+ + greenlet==3.3.1
+ [2026-02-14 18:28:38.808065] + grpcio==1.78.0
+ + grpcio-status==1.71.2
+ + httplib2==0.31.2
+ + idna==3.11
+ + isodate==0.7.2
+ + jinja2[2026-02-14 18:28:38.808310] ==3.1.6
+ + jsonschema==4.26.0
+ + jsonschema-specifications==2025.9.1
+ + markupsafe==3.0.3
+ + msal==1.34.0
+ + msal-extensions==[2026-02-14 18:28:38.808531] 1.3.1
+ + narwhals==2.16.0
+ + numpy==2.4.2
+ + packaging==26.0
+ + pandas==2.3.3
+ + pillow[2026-02-14 18:28:38.808732] ==12.1.1
+ + proto-plus==1.27.1
+ + protobuf==5.29.6
+ + pyarrow==23.0.0
+ + pyasn1==0.6.2
+ +[2026-02-14 18:28:38.808928]  pyasn1-modules==0.4.2
+ + pycparser==3.0
+ + pydantic==2.12.5
+ + pydantic-core==2.41.5
+ + pydeck==0.9.1
+ + [2026-02-14 18:28:38.809097] pyjwt==2.11.0
+ + pyparsing==3.3.2
+ + python-dateutil==2.9.0.post0
+ + pytz==2025.2
+ + referencing[2026-02-14 18:28:38.809295] ==0.37.0
+ + requests==2.32.5
+ + rpds-py==0.30.0
+ + rsa==4.9.1
+ + six==1.17.0
+ + smmap[2026-02-14 18:28:38.809466] ==5.0.2
+ + sqlalchemy==2.0.46
+ + streamlit==1.54.0
+ + tenacity==9.1.4
+ + toml==0.10.2
+ + tornado==6.5.4[2026-02-14 18:28:38.809627] 
+ + tqdm==4.67.3
+ + typing-extensions==4.15.0
+ + typing-inspection==0.4.2
+ + tzdata==2025.3
+ + uritemplate==[2026-02-14 18:28:38.809792] 4.2.0
+ + urllib3==2.6.3
+ + watchdog==6.0.0
+Checking if Streamlit is installed
+Found Streamlit version 1.54.0 in the environment
+Installing rich for an improved exception logging
+Using uv pip install.
+Using Python 3.13.12 environment at /home/adminuser/venv
+Resolved 4 packages in 125ms
+Prepared 4 packages in 135ms
+Installed 4 packages in 16ms
+ + markdown-it-py==4.0.0[2026-02-14 18:28:40.409482] 
+ + mdurl==0.1.2
+ + pygments==2.19.2
+ + rich==14.3.2
+
+────────────────────────────────────────────────────────────────────────────────────────
+
+[18:28:40] 🐍 Python dependencies were installed from /mount/src/bowlingassistant/requirements.txt using uv.
+Check if streamlit is installed
+Streamlit is already installed
+[18:28:41] 📦 Processed dependencies!
+
+
+
+/mount/src/bowlingassistant/bowlingAssistantApp.py:10: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
