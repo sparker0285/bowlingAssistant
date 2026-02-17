@@ -795,20 +795,34 @@ with st.sidebar.expander("⚠️ Danger Zone"):
 # --- Save Edits (run before refetch so next run sees updated data) ---
 if st.session_state.get('save_edits_clicked'):
     edited_data = st.session_state.get('edited_set_data')
+    set_id_for_save = st.session_state.get('save_edits_set_id') or st.session_state.get('set_id')
     did_save = False
-    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty:
-        apply_edits_to_db(con, edited_data)
-        did_save = True
+    if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty and set_id_for_save:
+        full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
+        full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
+        if not full_df.empty and len(full_df) == len(edited_data):
+            edited_data = edited_data.reset_index(drop=True)
+            merged = full_df.copy()
+            merged.update(edited_data)
+            apply_edits_to_db(con, merged)
+            did_save = True
     elif edited_data is not None and not isinstance(edited_data, pd.DataFrame):
         try:
-            df_edit = pd.DataFrame(edited_data)
-            if not df_edit.empty:
-                apply_edits_to_db(con, df_edit)
-                did_save = True
+            df_edit = pd.DataFrame(edited_data).reset_index(drop=True)
+            if not df_edit.empty and set_id_for_save:
+                full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
+                full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
+                if not full_df.empty and len(full_df) == len(df_edit):
+                    merged = full_df.copy()
+                    merged.update(df_edit)
+                    apply_edits_to_db(con, merged)
+                    did_save = True
         except Exception:
             pass
     if 'save_edits_clicked' in st.session_state:
         del st.session_state['save_edits_clicked']
+    if 'save_edits_set_id' in st.session_state:
+        del st.session_state['save_edits_set_id']
     if 'edited_set_data' in st.session_state:
         del st.session_state['edited_set_data']
     if did_save:
@@ -1015,25 +1029,18 @@ render_score_sheet(df_current_game, frame_scores, total_score, max_score)
 # --- Analytical Dashboard (editable grid) ---
 st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
-    display_df = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).copy()
-    display_df = display_df.drop(columns=['pins_knocked_down'], errors='ignore')
-    display_df["game-frame-shot"] = display_df.apply(
-        lambda r: f"{int(r['game_number'])}-{int(r['frame_number'])}-{int(r['shot_number'])}", axis=1
-    )
-    visible_columns = [
-        "game-frame-shot", "set_name", "shot_timestamp", "shot_result", "pins_left",
+    full_sorted = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
+    visible_cols = [
+        "set_name", "shot_timestamp", "shot_result", "pins_left",
         "lane_number", "bowling_ball", "arrows_pos", "breakpoint_pos", "ball_reaction",
         "split_name", "bowling_center"
     ]
-    visible_columns = [c for c in visible_columns if c in display_df.columns]
-    # Config for every column (required by Streamlit); hidden columns still need a valid config.
+    visible_cols = [c for c in visible_cols if c in full_sorted.columns]
+    display_visible = full_sorted[visible_cols].copy()
+    display_visible.insert(0, "game-frame-shot", full_sorted.apply(
+        lambda r: f"{int(r['game_number'])}-{int(r['frame_number'])}-{int(r['shot_number'])}", axis=1
+    ))
     column_config = {
-        "id": st.column_config.NumberColumn("id", disabled=True),
-        "set_id": st.column_config.TextColumn("set_id", disabled=True),
-        "game_id": st.column_config.TextColumn("game_id", disabled=True),
-        "game_number": st.column_config.NumberColumn("game_number", disabled=True),
-        "frame_number": st.column_config.NumberColumn("frame_number", disabled=True),
-        "shot_number": st.column_config.NumberColumn("shot_number", disabled=True),
         "game-frame-shot": st.column_config.TextColumn("game-frame-shot", disabled=True),
         "set_name": st.column_config.TextColumn("set_name", disabled=True),
         "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
@@ -1047,19 +1054,18 @@ if not df_set.empty:
         "split_name": st.column_config.TextColumn("Split", disabled=True),
         "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),
     }
-    if "is_split" in display_df.columns:
-        column_config["is_split"] = st.column_config.CheckboxColumn("is_split", disabled=True)
+    column_config = {k: v for k, v in column_config.items() if k in display_visible.columns}
     st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
-    edited_df = st.data_editor(
-        display_df,
+    edited_visible = st.data_editor(
+        display_visible,
         key="edited_set_data",
         use_container_width=True,
         hide_index=True,
-        column_order=visible_columns,
         column_config=column_config,
     )
     if st.button("Save edits", key="btn_save_edits"):
         st.session_state.save_edits_clicked = True
+        st.session_state.save_edits_set_id = st.session_state.set_id
         st.rerun()
 else:
     st.info("No shots submitted for this set yet.")

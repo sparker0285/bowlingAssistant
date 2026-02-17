@@ -365,3 +365,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 3. **Data editor column_config for all columns:**
     *   **Reasoning:** Streamlit's data_editor validates every column in the dataframe against column_config. Columns hidden via `column_order` were missing config entries, causing a type-compatibility error.
     *   **Change:** Added `column_config` entries for every column in the grid (id, set_id, game_id, game_number, frame_number, shot_number, and is_split when present), in addition to the visible columns. Hidden columns remain off the visible list via `column_order` but now have valid config so the editor loads without error.
+
+**Update (Follow-up):** Type-compatibility error persisted on Streamlit Cloud.
+
+4. **Data editor: visible-only dataframe and merge on save:**
+    *   **Reasoning:** Streamlit's type check still failed with the full dataframe (e.g. DuckDB/pandas dtypes or NaN in hidden columns). Passing only the visible columns to the data_editor avoids compatibility issues entirely.
+    *   **Change:** The grid now uses a dataframe that contains only the visible columns (game-frame-shot, set_name, shot_timestamp, shot_result, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, split_name, bowling_center). No hidden columns are passed to `st.data_editor`, so no type-compatibility error. On "Save edits", the save block fetches the full set from the DB, sorts it to match display order, merges the edited visible data back by index (`merged.update(edited_data)`), and calls `apply_edits_to_db(con, merged)` so the database still receives full rows (id, game_id, shot_number, etc.) for correct updates.
