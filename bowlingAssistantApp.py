@@ -1120,31 +1120,37 @@ if not df_set.empty:
         "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),
     }
     column_config = {k: v for k, v in column_config.items() if k in display_visible.columns}
-    st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
+    st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. **Click outside the edited cell or press Enter before clicking Save edits.**")
 
-    def save_edits_callback():
-        data = st.session_state.get("edited_set_data")
-        if data is not None:
-            if isinstance(data, pd.DataFrame):
-                st.session_state.pending_save_edits = data.copy()
-            else:
-                try:
-                    st.session_state.pending_save_edits = pd.DataFrame(data)
-                except Exception:
-                    st.session_state.pending_save_edits = None
-        else:
-            st.session_state.pending_save_edits = None
-        st.session_state.save_edits_clicked = True
-        st.session_state.save_edits_set_id = st.session_state.get("set_id")
+    with st.form("save_edits_form"):
+        edited_visible = st.data_editor(
+            display_visible,
+            key="edited_set_data",
+            use_container_width=True,
+            hide_index=True,
+            column_config=column_config,
+        )
+        submitted = st.form_submit_button("Save edits")
 
-    edited_visible = st.data_editor(
-        display_visible,
-        key="edited_set_data",
-        use_container_width=True,
-        hide_index=True,
-        column_config=column_config,
-    )
-    st.button("Save edits", key="btn_save_edits", on_click=save_edits_callback)
+    if submitted and edited_visible is not None and not edited_visible.empty and "game-frame-shot" in edited_visible.columns:
+        set_id_for_save = st.session_state.get("set_id")
+        if set_id_for_save:
+            full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
+            full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
+            if not full_df.empty:
+                merged = full_df.copy()
+                edit_cols = [c for c in edited_visible.columns if c != "game-frame-shot" and c in merged.columns]
+                for idx, full_row in merged.iterrows():
+                    g, f, s = int(full_row["game_number"]), int(full_row["frame_number"]), int(full_row["shot_number"])
+                    for _, edit_row in edited_visible.iterrows():
+                        eg, ef, es = _parse_game_frame_shot(edit_row.get("game-frame-shot"))
+                        if (eg, ef, es) == (g, f, s):
+                            for col in edit_cols:
+                                merged.at[idx, col] = edit_row[col]
+                            break
+                apply_edits_to_db(con, merged)
+                st.success("Edits saved. Score sheet and totals will update.")
+                st.rerun()
 else:
     st.info("No shots submitted for this set yet.")
 
