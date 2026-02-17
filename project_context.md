@@ -343,3 +343,14 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 9. **Split recognition fixes:**
     *   **Reasoning:** Splits were not matching due to possible pin type mismatch (int vs string) and/or splits.json not being found (e.g. different working directory on Streamlit Cloud).
     *   **Change:** Added `_normalize_pins_list(pins_left_list)` to convert all pin values to integers 1–10 so that both multiselect lists (e.g. `[3, 10]`) and string inputs (e.g. `["3", "10"]`) match the JSON keys. Cache keys when loading splits.json are built with `tuple(sorted(int(p) for p in entry["pins"]))` for consistency. `_load_splits()` now tries multiple base directories: script directory, current working directory, and parent of script directory, and only loads from a path where `splits.json` exists, so the file is found in more deployment layouts.
+
+---
+## Session from Monday, February 16, 2026
+
+**User Story:** Splits (e.g. 3–10 Baby Split, 7–10 Bedposts) were still not being recognized on Streamlit Cloud after splits.json was added to source control.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1. **Embedded USBC splits in app:**
+    *   **Reasoning:** Split recognition was unreliable when loading from `splits.json` on Streamlit Cloud (path/working-directory issues). The split list is static and will not change.
+    *   **Change:** Replaced file-based split loading with an embedded constant `_SPLITS_DATA`: a Python list of dicts with the same content as `splits.json` (all USBC split definitions). `_load_splits()` now builds the lookup cache from `_SPLITS_DATA` only, with no file I/O. This guarantees 3–10, 7–10, and all other defined splits are recognized regardless of deployment environment.

@@ -10,30 +10,46 @@ import re
 import pandas as pd
 import google.generativeai as genai
 
-# Load splits from same folder as this script (splits.json)
+# USBC split definitions (embedded for reliability; same as splits.json)
+_SPLITS_DATA = [
+    {"pins": [7, 10], "name": "Bedposts", "category": "Extreme Wide"},
+    {"pins": [4, 6, 7, 10], "name": "Big Four", "category": "Extreme Wide"},
+    {"pins": [4, 6, 7, 8, 10], "name": "Greek Church (Right Hand)", "category": "Complex Split"},
+    {"pins": [4, 6, 7, 9, 10], "name": "Greek Church (Left Hand)", "category": "Complex Split"},
+    {"pins": [2, 4, 6, 7, 10], "name": "Big Five (Right Hand)", "category": "Complex Split"},
+    {"pins": [3, 4, 6, 7, 10], "name": "Big Five (Left Hand)", "category": "Complex Split"},
+    {"pins": [5, 7, 10], "name": "Sour Apple / Lily", "category": "Middle Split"},
+    {"pins": [2, 7], "name": "Baby Split (Right Hand)", "category": "Baby Split"},
+    {"pins": [3, 10], "name": "Baby Split (Left Hand)", "category": "Baby Split"},
+    {"pins": [5, 7], "name": "Dime Store (Right Hand)", "category": "Dime Store"},
+    {"pins": [5, 10], "name": "Dime Store (Left Hand)", "category": "Dime Store"},
+    {"pins": [4, 5], "name": "Steam Fitter", "category": "Fit Split"},
+    {"pins": [5, 6], "name": "Fit Split", "category": "Fit Split"},
+    {"pins": [2, 3], "name": "Fit Split", "category": "Fit Split"},
+    {"pins": [7, 8], "name": "Back Row Fit Split", "category": "Fit Split"},
+    {"pins": [9, 10], "name": "Back Row Fit Split", "category": "Fit Split"},
+    {"pins": [4, 9], "name": "Parallel Split", "category": "Distant Split"},
+    {"pins": [6, 8], "name": "Parallel Split", "category": "Distant Split"},
+    {"pins": [4, 7, 10], "name": "Corner Split", "category": "Triangular"},
+    {"pins": [6, 7, 10], "name": "Corner Split", "category": "Triangular"},
+    {"pins": [2, 7, 10], "name": "Christmas Tree", "category": "Triangular"},
+    {"pins": [3, 7, 10], "name": "Christmas Tree", "category": "Triangular"},
+    {"pins": [7, 9], "name": "Cincinnati", "category": "Back Row"},
+    {"pins": [8, 10], "name": "Cincinnati", "category": "Back Row"},
+    {"pins": [4, 6], "name": "Golden Gate / Cincinnati", "category": "Middle Row"},
+]
+
 _SPLITS_CACHE = None
+
 def _load_splits():
+    """Return dict of (sorted pins tuple) -> split name. Uses embedded _SPLITS_DATA."""
     global _SPLITS_CACHE
     if _SPLITS_CACHE is not None:
         return _SPLITS_CACHE
-    for base_dir in [
-        os.path.dirname(os.path.abspath(__file__)),
-        os.getcwd(),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
-    ]:
-        try:
-            path = os.path.join(base_dir, "splits.json")
-            if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                _SPLITS_CACHE = {
-                    tuple(sorted(int(p) for p in entry["pins"])): entry["name"]
-                    for entry in data
-                }
-                return _SPLITS_CACHE
-        except Exception:
-            continue
-    _SPLITS_CACHE = {}
+    _SPLITS_CACHE = {
+        tuple(sorted(int(p) for p in entry["pins"])): entry["name"]
+        for entry in _SPLITS_DATA
+    }
     return _SPLITS_CACHE
 
 def _normalize_pins_list(pins_left_list):
