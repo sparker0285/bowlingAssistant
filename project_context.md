@@ -359,3 +359,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
     *   **Reasoning:** User wanted split leaves to show pins knocked down (e.g. S8 for 7,10) and the Data for Set table condensed for phone viewing.
     *   **Change (score sheet):** In `_shot_display_symbol`, when the first shot is a split leave, the symbol is now `'S' + str(10 - len(pins))` (e.g. "S8" for 7,10 leave; second shot still shows count, so frame reads "S8 1").
     *   **Change (Data for Set):** Removed from view (via `column_order`) the columns id, set_id, game_id, is_split. Added a combined column "game-frame-shot" with format `<game_number>-<frame_number>-<shot_number>` (e.g. 1-3-2). The underlying dataframe and database still contain all columns; only the visible columns on the page were changed for a more compact table.
+
+**Update (Follow-up):** Data for Set raised `StreamlitAPIException` in `_check_type_compatibilities` on Streamlit Cloud.
+
+3. **Data editor column_config for all columns:**
+    *   **Reasoning:** Streamlit's data_editor validates every column in the dataframe against column_config. Columns hidden via `column_order` were missing config entries, causing a type-compatibility error.
+    *   **Change:** Added `column_config` entries for every column in the grid (id, set_id, game_id, game_number, frame_number, shot_number, and is_split when present), in addition to the visible columns. Hidden columns remain off the visible list via `column_order` but now have valid config so the editor loads without error.

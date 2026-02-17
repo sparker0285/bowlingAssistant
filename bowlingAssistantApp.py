@@ -1026,6 +1026,29 @@ if not df_set.empty:
         "split_name", "bowling_center"
     ]
     visible_columns = [c for c in visible_columns if c in display_df.columns]
+    # Config for every column (required by Streamlit); hidden columns still need a valid config.
+    column_config = {
+        "id": st.column_config.NumberColumn("id", disabled=True),
+        "set_id": st.column_config.TextColumn("set_id", disabled=True),
+        "game_id": st.column_config.TextColumn("game_id", disabled=True),
+        "game_number": st.column_config.NumberColumn("game_number", disabled=True),
+        "frame_number": st.column_config.NumberColumn("frame_number", disabled=True),
+        "shot_number": st.column_config.NumberColumn("shot_number", disabled=True),
+        "game-frame-shot": st.column_config.TextColumn("game-frame-shot", disabled=True),
+        "set_name": st.column_config.TextColumn("set_name", disabled=True),
+        "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
+        "shot_result": st.column_config.TextColumn("shot_result", disabled=False),
+        "pins_left": st.column_config.TextColumn("pins_left", disabled=False),
+        "lane_number": st.column_config.NumberColumn("lane_number", disabled=False),
+        "bowling_ball": st.column_config.TextColumn("bowling_ball", disabled=False),
+        "arrows_pos": st.column_config.TextColumn("arrows_pos", disabled=False),
+        "breakpoint_pos": st.column_config.TextColumn("breakpoint_pos", disabled=False),
+        "ball_reaction": st.column_config.TextColumn("ball_reaction", disabled=False),
+        "split_name": st.column_config.TextColumn("Split", disabled=True),
+        "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),
+    }
+    if "is_split" in display_df.columns:
+        column_config["is_split"] = st.column_config.CheckboxColumn("is_split", disabled=True)
     st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
     edited_df = st.data_editor(
         display_df,
@@ -1033,20 +1056,7 @@ if not df_set.empty:
         use_container_width=True,
         hide_index=True,
         column_order=visible_columns,
-        column_config={
-            "game-frame-shot": st.column_config.TextColumn("game-frame-shot", disabled=True),
-            "set_name": st.column_config.TextColumn("set_name", disabled=True),
-            "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
-            "shot_result": st.column_config.TextColumn("shot_result", disabled=False),
-            "pins_left": st.column_config.TextColumn("pins_left", disabled=False),
-            "lane_number": st.column_config.NumberColumn("lane_number", disabled=False),
-            "bowling_ball": st.column_config.TextColumn("bowling_ball", disabled=False),
-            "arrows_pos": st.column_config.TextColumn("arrows_pos", disabled=False),
-            "breakpoint_pos": st.column_config.TextColumn("breakpoint_pos", disabled=False),
-            "ball_reaction": st.column_config.TextColumn("ball_reaction", disabled=False),
-            "split_name": st.column_config.TextColumn("Split", disabled=True),
-            "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),
-        },
+        column_config=column_config,
     )
     if st.button("Save edits", key="btn_save_edits"):
         st.session_state.save_edits_clicked = True
