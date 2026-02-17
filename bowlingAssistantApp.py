@@ -332,7 +332,7 @@ def _shot_display_symbol(shot, is_first_shot):
         return '/'
     if shot_result in ('Leave', 'Leave - Split') and is_first_shot:
         if get_split_name(pins):
-            return 'S'
+            return 'S' + str(10 - len(pins))  # e.g. S8 for 7,10 split
         return str(10 - len(pins)) if pins else '-'
     if shot_result == 'Open':
         kn = get_pins_from_str(shot.get('pins_knocked_down'))
@@ -1017,22 +1017,35 @@ st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
     display_df = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).copy()
     display_df = display_df.drop(columns=['pins_knocked_down'], errors='ignore')
+    display_df["game-frame-shot"] = display_df.apply(
+        lambda r: f"{int(r['game_number'])}-{int(r['frame_number'])}-{int(r['shot_number'])}", axis=1
+    )
+    visible_columns = [
+        "game-frame-shot", "set_name", "shot_timestamp", "shot_result", "pins_left",
+        "lane_number", "bowling_ball", "arrows_pos", "breakpoint_pos", "ball_reaction",
+        "split_name", "bowling_center"
+    ]
+    visible_columns = [c for c in visible_columns if c in display_df.columns]
     st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
     edited_df = st.data_editor(
         display_df,
         key="edited_set_data",
         use_container_width=True,
         hide_index=True,
+        column_order=visible_columns,
         column_config={
-            "id": st.column_config.NumberColumn("id", disabled=True),
-            "set_id": st.column_config.TextColumn("set_id", disabled=True),
+            "game-frame-shot": st.column_config.TextColumn("game-frame-shot", disabled=True),
             "set_name": st.column_config.TextColumn("set_name", disabled=True),
-            "game_id": st.column_config.TextColumn("game_id", disabled=True),
-            "game_number": st.column_config.NumberColumn("game_number", disabled=True),
-            "frame_number": st.column_config.NumberColumn("frame", disabled=False),
-            "shot_number": st.column_config.NumberColumn("shot", disabled=False),
             "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
+            "shot_result": st.column_config.TextColumn("shot_result", disabled=False),
+            "pins_left": st.column_config.TextColumn("pins_left", disabled=False),
+            "lane_number": st.column_config.NumberColumn("lane_number", disabled=False),
+            "bowling_ball": st.column_config.TextColumn("bowling_ball", disabled=False),
+            "arrows_pos": st.column_config.TextColumn("arrows_pos", disabled=False),
+            "breakpoint_pos": st.column_config.TextColumn("breakpoint_pos", disabled=False),
+            "ball_reaction": st.column_config.TextColumn("ball_reaction", disabled=False),
             "split_name": st.column_config.TextColumn("Split", disabled=True),
+            "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),
         },
     )
     if st.button("Save edits", key="btn_save_edits"):
