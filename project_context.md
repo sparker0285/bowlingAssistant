@@ -409,3 +409,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 2. **DuckDB INSERT: native Python types:**
     *   **Reasoning:** DuckDB can raise NotImplementedError when parameterized INSERT receives numpy/pandas types (e.g. numpy.int64 from pandas/DuckDB results or selectbox).
     *   **Change:** In `submit_shot`, all INSERT parameters are now converted to native Python types before calling con.execute: set_id, set_name, game_id, shot_res, pins_knocked_down_str, pins_left_standing_str, lane_number, bowling_ball, ball_reaction, bowling_center, split_name_val as str (or None); game_number, frame_number, shot_number as int(); arrows_pos and breakpoint_pos as int() when present, else None. This prevents the second-game first-shot crash.
+
+**Update (Follow-up):** Save Edits still not persisting; changes reverted on refresh or when adding another shot.
+
+3. **Save Edits: capture data in button callback:**
+    *   **Reasoning:** When "Save edits" is clicked, the script reruns and the save block runs before the data_editor is rendered again. In that run, `edited_set_data` in session state can be missing or stale (widget state may not be available until the widget is rendered). So the save was sometimes using no data or old data.
+    *   **Change:** The Save edits button now uses `on_click=save_edits_callback`. The callback runs when the button is clicked (with the current widget state from the client). It copies `st.session_state["edited_set_data"]` to `st.session_state["pending_save_edits"]` and sets `save_edits_clicked` and `save_edits_set_id`. The save block uses `pending_save_edits` first (fallback to `edited_set_data`), then merges by game-frame-shot and calls `apply_edits_to_db`. After save, `pending_save_edits` is cleared. This ensures the edited table data is captured at click time and persisted correctly.

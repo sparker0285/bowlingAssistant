@@ -811,7 +811,9 @@ def _parse_game_frame_shot(gfs):
         return None, None, None
 
 if st.session_state.get('save_edits_clicked'):
-    edited_data = st.session_state.get('edited_set_data')
+    edited_data = st.session_state.get('pending_save_edits')
+    if edited_data is None:
+        edited_data = st.session_state.get('edited_set_data')
     set_id_for_save = st.session_state.get('save_edits_set_id') or st.session_state.get('set_id')
     did_save = False
     if edited_data is not None and isinstance(edited_data, pd.DataFrame) and not edited_data.empty and set_id_for_save and "game-frame-shot" in edited_data.columns:
@@ -855,6 +857,8 @@ if st.session_state.get('save_edits_clicked'):
         del st.session_state['save_edits_clicked']
     if 'save_edits_set_id' in st.session_state:
         del st.session_state['save_edits_set_id']
+    if 'pending_save_edits' in st.session_state:
+        del st.session_state['pending_save_edits']
     if 'edited_set_data' in st.session_state:
         del st.session_state['edited_set_data']
     if did_save:
@@ -1117,6 +1121,22 @@ if not df_set.empty:
     }
     column_config = {k: v for k, v in column_config.items() if k in display_visible.columns}
     st.caption("Edit cells as needed. Changing 'pins_left' will auto-update shot_result and recalculate scores. Click Save edits to persist.")
+
+    def save_edits_callback():
+        data = st.session_state.get("edited_set_data")
+        if data is not None:
+            if isinstance(data, pd.DataFrame):
+                st.session_state.pending_save_edits = data.copy()
+            else:
+                try:
+                    st.session_state.pending_save_edits = pd.DataFrame(data)
+                except Exception:
+                    st.session_state.pending_save_edits = None
+        else:
+            st.session_state.pending_save_edits = None
+        st.session_state.save_edits_clicked = True
+        st.session_state.save_edits_set_id = st.session_state.get("set_id")
+
     edited_visible = st.data_editor(
         display_visible,
         key="edited_set_data",
@@ -1124,10 +1144,7 @@ if not df_set.empty:
         hide_index=True,
         column_config=column_config,
     )
-    if st.button("Save edits", key="btn_save_edits"):
-        st.session_state.save_edits_clicked = True
-        st.session_state.save_edits_set_id = st.session_state.set_id
-        st.rerun()
+    st.button("Save edits", key="btn_save_edits", on_click=save_edits_callback)
 else:
     st.info("No shots submitted for this set yet.")
 
