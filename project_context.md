@@ -452,3 +452,13 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 3.  **Mobile-Friendly Pin Layout:**
     *   **Reasoning:** The 9-column grid layout was too wide for mobile screens, causing the buttons to be squished or misaligned.
     *   **Change:** Refactored the pin deck layout to use a 4-row structure with `st.columns` and relative width spacers. This allows the buttons to be centered correctly on narrower screens while maintaining the triangle formation.
+
+**Update (Follow-up):** The user reported that the visual pin selector was still not working well on mobile and requested to revert to the dropdown.
+
+4.  **Revert to Multiselect:**
+    *   **Reasoning:** The visual pin selector, even with layout adjustments, was not providing a satisfactory user experience on mobile devices. The user preferred the reliability of the standard multiselect dropdown.
+    *   **Change:** Removed the visual pin selector code (pin buttons, `pin_states`, `toggle_pin` logic).
+    *   **Change:** Restored the `st.multiselect` widget for "Pins Left Standing".
+    *   **Change:** Restored the ASCII art pin diagram for reference.
+    *   **Change:** Updated `submit_shot` to read from `st.session_state.pins_left_multiselect` again.
+    *   **Change:** Ensured the context-aware logic (disabling pins already knocked down) is applied to the multiselect options.
