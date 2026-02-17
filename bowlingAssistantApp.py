@@ -1040,16 +1040,27 @@ if not df_set.empty:
     display_visible.insert(0, "game-frame-shot", full_sorted.apply(
         lambda r: f"{int(r['game_number'])}-{int(r['frame_number'])}-{int(r['shot_number'])}", axis=1
     ))
+    # Coerce dtypes for Streamlit data_editor compatibility
+    for col in display_visible.columns:
+        if col == "shot_timestamp":
+            if display_visible[col].dtype == object:
+                display_visible[col] = pd.to_datetime(display_visible[col], errors="coerce")
+            continue
+        if display_visible[col].dtype == object or pd.api.types.is_string_dtype(display_visible[col]):
+            display_visible[col] = display_visible[col].fillna("").astype(str).replace("nan", "")
+        elif pd.api.types.is_integer_dtype(display_visible[col]) and display_visible[col].isna().any():
+            display_visible[col] = display_visible[col].astype(float)
+    # lane_number is VARCHAR (e.g. "Left Lane"); arrows/breakpoint can be int or float (NaN)
     column_config = {
         "game-frame-shot": st.column_config.TextColumn("game-frame-shot", disabled=True),
         "set_name": st.column_config.TextColumn("set_name", disabled=True),
         "shot_timestamp": st.column_config.DatetimeColumn("shot_timestamp", disabled=True),
         "shot_result": st.column_config.TextColumn("shot_result", disabled=False),
         "pins_left": st.column_config.TextColumn("pins_left", disabled=False),
-        "lane_number": st.column_config.NumberColumn("lane_number", disabled=False),
+        "lane_number": st.column_config.TextColumn("lane_number", disabled=False),
         "bowling_ball": st.column_config.TextColumn("bowling_ball", disabled=False),
-        "arrows_pos": st.column_config.TextColumn("arrows_pos", disabled=False),
-        "breakpoint_pos": st.column_config.TextColumn("breakpoint_pos", disabled=False),
+        "arrows_pos": st.column_config.NumberColumn("arrows_pos", disabled=False),
+        "breakpoint_pos": st.column_config.NumberColumn("breakpoint_pos", disabled=False),
         "ball_reaction": st.column_config.TextColumn("ball_reaction", disabled=False),
         "split_name": st.column_config.TextColumn("Split", disabled=True),
         "bowling_center": st.column_config.TextColumn("bowling_center", disabled=True),

@@ -371,3 +371,9 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 4. **Data editor: visible-only dataframe and merge on save:**
     *   **Reasoning:** Streamlit's type check still failed with the full dataframe (e.g. DuckDB/pandas dtypes or NaN in hidden columns). Passing only the visible columns to the data_editor avoids compatibility issues entirely.
     *   **Change:** The grid now uses a dataframe that contains only the visible columns (game-frame-shot, set_name, shot_timestamp, shot_result, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, split_name, bowling_center). No hidden columns are passed to `st.data_editor`, so no type-compatibility error. On "Save edits", the save block fetches the full set from the DB, sorts it to match display order, merges the edited visible data back by index (`merged.update(edited_data)`), and calls `apply_edits_to_db(con, merged)` so the database still receives full rows (id, game_id, shot_number, etc.) for correct updates.
+
+**Update (Follow-up):** Data editor type-compatibility error continued.
+
+5. **Data editor column types and dtypes:**
+    *   **Reasoning:** `lane_number` is stored as VARCHAR (e.g. "Left Lane") but was configured as NumberColumn; mixed or object dtypes can also cause Streamlit's type check to fail.
+    *   **Change:** Set `lane_number` to TextColumn instead of NumberColumn. Set `arrows_pos` and `breakpoint_pos` to NumberColumn. Added dtype coercion before passing the visible dataframe to the data_editor: object/string columns filled with "" and converted to str; integer columns with NaN converted to float; `shot_timestamp` as object converted with `pd.to_datetime(..., errors="coerce")`.
