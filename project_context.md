@@ -377,3 +377,20 @@ This file contains a summary of questions and answers about the `bowlingAssistan
 5. **Data editor column types and dtypes:**
     *   **Reasoning:** `lane_number` is stored as VARCHAR (e.g. "Left Lane") but was configured as NumberColumn; mixed or object dtypes can also cause Streamlit's type check to fail.
     *   **Change:** Set `lane_number` to TextColumn instead of NumberColumn. Set `arrows_pos` and `breakpoint_pos` to NumberColumn. Added dtype coercion before passing the visible dataframe to the data_editor: object/string columns filled with "" and converted to str; integer columns with NaN converted to float; `shot_timestamp` as object converted with `pd.to_datetime(..., errors="coerce")`.
+
+---
+## Session from Monday, February 16, 2026 (follow-up)
+
+**User requests:** Data for Set table tweaks and fix score not updating after Save Edits.
+
+**Changes Implemented in `bowlingAssistantApp.py`:**
+
+1. **Set Name and Shot timestamp moved to far right:**
+    *   **Change:** Reordered `visible_cols` so that `set_name` and `shot_timestamp` are last (after ball_reaction, split_name, bowling_center). Column order is now: game-frame-shot, shot_result, pins_left, lane_number, bowling_ball, arrows_pos, breakpoint_pos, ball_reaction, split_name, bowling_center, set_name, shot_timestamp.
+
+2. **Newest data on top (descending):**
+    *   **Change:** Table is built from `full_sorted.iloc[::-1]` so rows are newest first. On Save Edits, `edited_data` is reversed back (`iloc[::-1].reset_index(drop=True)`) before merging with `full_df` so that row indices align and the correct DB row receives each edit.
+
+3. **Score not updating after Save Edits:**
+    *   **Reasoning:** After editing pins_left and saving, the score sheet and totals did not reflect the change. Possible causes: wrong row alignment when merging (fixed by reversing edited_data when table is descending), or pins_left not normalized when writing to DB.
+    *   **Change:** In `apply_edits_to_db`, normalized `pins_left_str` so that None/NaN becomes '' and string "nan" is stripped to avoid writing invalid values. Merge order fix (reverse edited_data before update) ensures the edited row is written to the correct shot in the DB so scores recalculate correctly on the next run.

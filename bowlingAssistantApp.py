@@ -525,7 +525,12 @@ def apply_edits_to_db(con, edited_df):
             if sn:
                 shot_result = "Leave - Split"
                 split_name_val = sn
-        pins_left_str = str(pins_left) if pins_left is not None and (not isinstance(pins_left, float) or not pd.isna(pins_left)) else ''
+        if pins_left is None or (isinstance(pins_left, float) and pd.isna(pins_left)):
+            pins_left_str = ''
+        else:
+            pins_left_str = str(pins_left).strip()
+            if pins_left_str.lower() == 'nan':
+                pins_left_str = ''
         lane_number = row.get('lane_number')
         bowling_ball = row.get('bowling_ball')
         arrows_pos = row.get('arrows_pos')
@@ -801,7 +806,7 @@ if st.session_state.get('save_edits_clicked'):
         full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
         full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
         if not full_df.empty and len(full_df) == len(edited_data):
-            edited_data = edited_data.reset_index(drop=True)
+            edited_data = edited_data.iloc[::-1].reset_index(drop=True)
             merged = full_df.copy()
             merged.update(edited_data)
             apply_edits_to_db(con, merged)
@@ -813,6 +818,7 @@ if st.session_state.get('save_edits_clicked'):
                 full_df = con.execute("SELECT * FROM shots WHERE set_id = ?", [set_id_for_save]).fetchdf()
                 full_df = full_df.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
                 if not full_df.empty and len(full_df) == len(df_edit):
+                    df_edit = df_edit.iloc[::-1].reset_index(drop=True)
                     merged = full_df.copy()
                     merged.update(df_edit)
                     apply_edits_to_db(con, merged)
@@ -832,7 +838,6 @@ if st.session_state.get('save_edits_clicked'):
 # --- Game Selection & Data Fetching ---
 st.sidebar.header("Game Management")
 df_set = con.execute("SELECT * FROM shots WHERE set_id = ?", [st.session_state.set_id]).fetchdf()
-
 if st.session_state.get('edits_saved_message'):
     st.success("Edits saved. Score sheet and totals updated.")
     del st.session_state['edits_saved_message']
@@ -1031,15 +1036,16 @@ st.header(f"📊 Data for Set: {st.session_state.set_name}")
 if not df_set.empty:
     full_sorted = df_set.sort_values(by=['game_number', 'frame_number', 'shot_number', 'id']).reset_index(drop=True)
     visible_cols = [
-        "set_name", "shot_timestamp", "shot_result", "pins_left",
-        "lane_number", "bowling_ball", "arrows_pos", "breakpoint_pos", "ball_reaction",
-        "split_name", "bowling_center"
+        "shot_result", "pins_left", "lane_number", "bowling_ball", "arrows_pos", "breakpoint_pos",
+        "ball_reaction", "split_name", "bowling_center", "set_name", "shot_timestamp"
     ]
     visible_cols = [c for c in visible_cols if c in full_sorted.columns]
     display_visible = full_sorted[visible_cols].copy()
-    display_visible.insert(0, "game-frame-shot", full_sorted.apply(
+    display_visible = display_visible.iloc[::-1].reset_index(drop=True)
+    gfs = full_sorted.iloc[::-1].reset_index(drop=True).apply(
         lambda r: f"{int(r['game_number'])}-{int(r['frame_number'])}-{int(r['shot_number'])}", axis=1
-    ))
+    )
+    display_visible.insert(0, "game-frame-shot", gfs)
     # Coerce dtypes for Streamlit data_editor compatibility
     for col in display_visible.columns:
         if col == "shot_timestamp":
